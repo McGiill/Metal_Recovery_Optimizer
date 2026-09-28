@@ -1,0 +1,55 @@
+# ── 에셋 패키지 (1GB) ─────────────────────────────
+# download.codyssey.kr/Youngpoong.zip 압축 해제 결과. git에 올리지 않는다.
+Youngpoong/
+*.unitypackage
+*.mp4
+
+# ── 데이터 ────────────────────────────────────────
+# 원본/정제 데이터는 커밋하지 않는다 (README의 다운로드 절차로 각자 확보).
+# 단 data/fixtures/ 는 병렬 개발용 계약 샘플이므로 커밋한다.
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+
+# ── 산출물 ────────────────────────────────────────
+artifacts/*
+!artifacts/.gitkeep
+docs/figures/*
+!docs/figures/.gitkeep
+
+# ── Python ───────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.ipynb_checkpoints/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# ── Unity ────────────────────────────────────────
+unity/**/[Ll]ibrary/
+unity/**/[Tt]emp/
+unity/**/[Oo]bj/
+unity/**/[Bb]uild/
+unity/**/[Bb]uilds/
+unity/**/[Ll]ogs/
+unity/**/[Uu]ser[Ss]ettings/
+unity/**/[Mm]emoryCaptures/
+unity/**/[Rr]ecordings/
+unity/**/*.csproj
+unity/**/*.sln
+unity/**/*.unityproj
+unity/**/*.apk
+unity/**/*.app
+unity/**/*.exe
+unity/**/sysinfo.txt
+unity/**/crashlytics-build.properties
+
+# ── OS / IDE ─────────────────────────────────────
+.DS_Store
+.idea/
+.vscode/

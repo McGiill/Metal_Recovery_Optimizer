@@ -1,0 +1,19 @@
+# 커밋 전 자동 포맷 — 스타일 논쟁과 머지 diff 노이즈를 제거한다.
+# 설치: pre-commit install   (requirements.txt 설치 후 1회)
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.4.4
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-added-large-files
+        args: [--maxkb=5120]     # 5MB 초과 파일 커밋 차단 (에셋 사고 방지)
+      - id: check-merge-conflict
+      - id: check-yaml
