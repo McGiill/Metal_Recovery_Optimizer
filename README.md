@@ -100,7 +100,6 @@ artifacts/             학습된 모델 등 (git 제외)
 
 - **한 파일은 한 사람만 수정한다.** 각 파일 상단에 소유자가 적혀 있다
 - 브랜치: `feat/p1-cleaning` 형식. main 직접 push 금지
-- PR 리뷰어 고정: P1→P2→P3→P4→P5→P1
 - `docs/INTERFACE.md` 는 **동결**. 변경은 주간 회의 승인 후에만
 - 커밋 전 `pre-commit` 이 ruff·black 을 적용한다
 
