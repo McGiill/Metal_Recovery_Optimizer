@@ -1,0 +1,68 @@
+# Module 3 설정 — 소유자: P4
+# 목표치 · 범위 · 현장 단위 · z값 · predictor 종류를 모두 여기서 관리한다.
+# 코드에 수치를 하드코딩하지 않는다.
+
+targets:
+  ni_recovery_pct: 95.0
+  co_recovery_pct: 90.0
+
+uncertainty:
+  use_chance_constraint: true
+  chance_z: 1.28      # 판정용: 단측 90%  →  μ − 1.28σ ≥ 목표
+  interval_z: 1.645   # 표시용: 양측 90% 구간  →  μ ± 1.645σ
+
+# 결정 변수 — 박스 범위는 데이터 사전 정상 범위.
+# unit: 현장 단위 (기본 Grid 간격) / coarse_step: 비교 실험용 성긴 격자
+decision_variables:
+  acid_l:  { min: 400, max: 1500, unit: 10,  coarse_step: 50 }
+  temp_c:  { min: 40,  max: 95,   unit: 1,   coarse_step: 5 }
+  time_hr: { min: 1,   max: 8,    unit: 0.5, coarse_step: 0.5 }
+
+# 원료 1kg당 황산(L/kg). 원본 관측 1~99 백분위 (418행, 2026-10-11 analysis/facts.py).
+# null 이면 미적용. P1 정제 데이터가 오면 다시 계산한다.
+ratio_constraints:
+  acid_per_feed: { min: 2.35, max: 16.16 }
+
+# 비용 = Σ weight × 변수값. 단가 정보가 없어 황산량을 대리 비용으로 쓴다.
+cost:
+  weights: { acid_l: 1.0, temp_c: 0.0, time_hr: 0.0 }
+
+# 동점 처리 순서 (모두 작은 쪽 우선). 없는 컬럼은 건너뛴다.
+tie_break: [cost, uncertainty, domain_distance, temp_c, time_hr]
+
+domain:
+  enabled: true
+  source: raw_minimal # raw_minimal (analysis/load_raw.py) | processed (P1 정제 데이터, path 지정)
+  path: null
+  method: knn
+  k: 5
+  percentile: 95      # 공정 조건 판정 (결정 변수 + 원료)
+  feed_percentile: 99 # 원료 자체 판정 → 밖이면 out_of_domain
+  columns: null       # null → 결정 변수 + 원료 성분
+
+# 신뢰도 등급 (status=ok 일 때). high: σ 있음 + 유사 배치 ≥ high_similar,
+# medium: 유사 배치 ≥ medium_similar 또는 적용 범위 판정기 없음, 나머지 low.
+# 목표 여유는 쓰지 않는다 — 비용 최소해는 항상 목표 경계 위에 있다. 실제 σ 분포를 보고 재조정.
+confidence:
+  high_similar: 5
+  medium_similar: 2
+
+features:
+  type: identity      # identity | p2   (p2 → module1_preprocessing.features.add_features)
+
+predictor:
+  type: mock_analytic # mock_analytic | proxy_rf | real   ← 실제 모델 도착 시 이것만 바꾼다
+  path: null          # proxy_rf / real: joblib 파일 경로 (artifacts/)
+  version: null       # real 모델 버전 표기 (meta.model_version)
+  # 개발·검증용 가짜 모델 상수. 결과 수치로 쓰지 않는다.
+  # 가산형 포화 모델, analysis/calibrate_mock.py 로 원본 275행에 맞춤 (RMSE Ni 1.62 / Co 1.84).
+  # 확률 제약을 켜면 불순물 합 ≲ 4% (A급 수준) 만 목표 달성 가능, Co 가 병목 — 원본 경향과 일치.
+  mock:
+    acid_scale: 5.999   # 산 비율(L/kg) 포화 척도
+    temp_scale: 29.16   # (온도 − 40℃) 포화 척도
+    time_scale: 3.154   # 시간(hr) 포화 척도
+    temp_origin: 40.0
+    cap: 100.0
+    ni: { b0: 60.94, acid: 19.93, temp: 11.57, time: 14.36, impurity: 0.8919 }
+    co: { b0: 55.59, acid: 19.52, temp: 13.65, time: 13.35, impurity: 1.254 }
+    std: { ni: 1.62, co: 1.84 }
