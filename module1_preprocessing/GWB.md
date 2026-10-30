@@ -6,9 +6,9 @@
 ## 실행 방법
 
 1. 원본 엑셀을 `data/raw/영풍그룹_금속회수율최적화_RawMaterialData_학생배포용.xlsx`에 넣는다.
-2. `module1_preprocessing/notebooks/01_p1_preprocessing_flow.ipynb`의 마지막 셀을 `SAVE_RESULTS=True`로 설정한다. 기본값은 `False`이다.
+2. `notebooks/01_p1_preprocessing_flow.ipynb`의 마지막 셀을 `SAVE_RESULTS=True`로 설정한다. 기본값은 `False`이다.
 3. P1 노트북에서 **Restart Kernel and Run All**을 실행해 정제본을 저장한다.
-4. `module1_preprocessing/notebooks/02_p2_feature_analysis.ipynb`에서 **Restart Kernel and Run All**을 실행한다. P2의 저장 기본값은 `True`이다.
+4. `notebooks/02_p2_feature_analysis.ipynb`에서 **Restart Kernel and Run All**을 실행한다. P2의 저장 기본값은 `True`이다.
 
 노트북 커널에서 사용할 Python 환경에 의존성을 설치한다. 아래 명령은 프로젝트 루트에서 실행한다.
 
@@ -16,7 +16,7 @@
 python -m pip install -r requirements.txt
 ```
 
-노트북은 프로젝트 루트 또는 `module1_preprocessing/notebooks`에서 실행한다.
+노트북은 프로젝트 루트 또는 `notebooks`에서 실행한다.
 경로는 프로젝트 루트를 기준으로 계산한다. 원본·결과 CSV와 그림은 Git 제외 대상이다.
 
 ## P1 — 데이터 정제
@@ -28,23 +28,23 @@ python -m pip install -r requirements.txt
 3. 날짜 6종 형식 변환 및 등급 A/B/C 정규화
 4. Ni 함량 999, 황산 15000, 온도 -5, 시간 0을 결측으로 변환
 5. 등급별 중앙값으로 수치 결측 대체
-6. 기본 16열 기준 `clean()` 결과와 일치 검증
+6. 플래그 포함 33열 기준 `clean()` 결과와 일치 검증
 7. 데이터사전 범위 위반 확인 및 시각화
 
-원본은 424행 × 16열이며 정제본은 420행 × 16열이다.
+원본은 424행 × 16열이며 정제본은 420행 × 33열이다(원본 16열 + sentinel_/imputed_ 플래그 17열).
 수치 입력·타깃 결측은 0개이고 날짜 결측은 21행이다.
 센티널 이외의 범위 밖 경계값은 유지하며 범위 위반은 54셀이다.
 9절에서는 결측 위치·수와 `ni_pct`, `time_hr`, `temp_c`의 분포를 확인한다.
 
 ```text
 data/processed/p1_flow_notebook/
-  p1_proccessed.csv    기본 16열 정제 데이터
+  p1_processed.csv    정제 데이터 33열 (원본 16열 + 플래그 17열)
   range_summary.csv   정상 범위 위반 요약
 ```
 
 ## P2 — EDA와 파생변수 효과 검증
 
-P2는 `p1_proccessed.csv`의 처리값을 그대로 사용한다.
+P2는 `p1_processed.csv`의 처리값을 그대로 사용한다.
 흐름은 EDA → 파생변수 생성 → 모델별 효과 검증 → 결과 저장이다.
 EDA에는 기본 통계, 등급별 평균, 회수율 분포, 공정 조건 구간별 추세,
 원본 입력과 회수율의 상관행렬을 포함한다.
@@ -144,8 +144,8 @@ Arrhenius 항은 선형회귀·Ridge에 적합한 모델별 검토 후보이다.
 
 아래 경로도 프로젝트 루트 기준이다.
 
-- `module1_preprocessing/notebooks/01_p1_preprocessing_flow.ipynb`: P1 정제 흐름
-- `module1_preprocessing/notebooks/02_p2_feature_analysis.ipynb`: P2 분석 전체 흐름
+- `notebooks/01_p1_preprocessing_flow.ipynb`: P1 정제 흐름
+- `notebooks/02_p2_feature_analysis.ipynb`: P2 분석 전체 흐름
 - `module1_preprocessing/cleaning.py`: P1 정제 함수
 - `module1_preprocessing/validate.py`: P1 품질 진단과 시각화 함수
 - `module1_preprocessing/features.py`: P1 정제 CSV 로딩·스키마 확인, 파생변수 생성, 모델·피처 구성 비교

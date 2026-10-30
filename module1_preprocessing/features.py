@@ -71,14 +71,14 @@ def add_features(df: pd.DataFrame, feature_cols=None) -> pd.DataFrame:
 def load_p1_output(path):
     path = Path(path)
     if not path.is_file():
-        raise FileNotFoundError('P1 노트북에서 p1_proccessed.csv를 먼저 저장하세요.')
+        raise FileNotFoundError('P1 노트북에서 SAVE_RESULTS=True 로 p1_processed.csv를 먼저 저장하세요.')
     frame = pd.read_csv(path, encoding='utf-8-sig')
     required = ['batch_id', 'analysis_date', 'grade'] + FEATURE_COLS + TARGET_COLS
     missing = set(required) - set(frame)
     if missing:
         raise ValueError(f'P1 CSV의 필수 열이 없습니다: {sorted(missing)}')
-    if len(frame.columns) != len(required):
-        raise ValueError('P1 데이터 CSV는 원본과 같은 16열이어야 합니다.')
+    # P1 CSV는 원본 16열 + sentinel_/imputed_ 플래그 17열 = 33열이다.
+    # 플래그는 대치 이력 추적용이며 모델 입력에는 쓰지 않는다. 존재해도 무시한다.
     frame['analysis_date'] = pd.to_datetime(frame['analysis_date'], errors='raise')
     if frame['batch_id'].isna().any() or not frame['batch_id'].is_unique:
         raise ValueError('P1 CSV의 배치 ID는 비어 있지 않고 고유해야 합니다.')
