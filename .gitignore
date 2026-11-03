@@ -53,3 +53,8 @@ unity/**/crashlytics-build.properties
 .DS_Store
 .idea/
 .vscode/
+
+# 논문 작업물
+example/
+*.docx
+*.pdf
