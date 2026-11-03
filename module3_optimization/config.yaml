@@ -51,8 +51,8 @@ features:
   type: identity      # identity | p2   (p2 → module1_preprocessing.features.add_features)
 
 predictor:
-  type: mock_analytic # mock_analytic | proxy_rf | real   ← 실제 모델 도착 시 이것만 바꾼다
-  path: null          # proxy_rf / real: joblib 파일 경로 (artifacts/)
+  type: real          # mock_analytic | proxy_rf | real   ← 실제 모델 도착 시 이것만 바꾼다
+  path: artifacts/recovery_model.joblib  # proxy_rf / real: joblib 파일 경로 (artifacts/)
   version: null       # real 모델 버전 표기 (meta.model_version)
   # 개발·검증용 가짜 모델 상수. 결과 수치로 쓰지 않는다.
   # 가산형 포화 모델, analysis/calibrate_mock.py 로 원본 275행에 맞춤 (RMSE Ni 1.62 / Co 1.84).
