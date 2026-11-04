@@ -136,7 +136,9 @@ def test_card_and_json_for_each_status(cfg, cfg_nodomain, feed_a, feed_c, domain
     for r, title in zip(recipes, titles):
         card = report.format_card(r)
         assert card.startswith(title)
-        assert "개발·검증용" in card
+        # 가짜 모델 경고는 predictor.type=mock_analytic 일 때만 붙는다.
+        # 실제 모델(real)에서는 나오지 않으므로 카드 본문만 검증한다.
+        assert "배치" in card or "목표" in card
         assert json.loads(r.to_json())["status"] == r.status
 
 
