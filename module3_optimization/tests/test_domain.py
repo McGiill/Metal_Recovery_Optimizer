@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from module3_optimization.domain import FEED_COLS, DomainChecker, build_domains
+from module3_optimization.domain import DECISION_COLS, FEED_COLS, DomainChecker, build_domains
 
 
 def synthetic_train(n=300, seed=0):
@@ -64,4 +64,7 @@ def test_distance_rejects_nan_query(train):
 def test_build_domains_returns_process_and_feed(cfg, train):
     process, feed = build_domains(cfg, train)
     assert feed.cols == FEED_COLS
-    assert set(FEED_COLS) < set(process.cols)
+    # process 판정기는 결정 변수만 본다. 원료는 feed 판정기가 전담한다.
+    # 원료를 섞으면 결정 변수 2축의 극단성이 나머지 축 평균에 희석된다.
+    assert process.cols == DECISION_COLS
+    assert not set(FEED_COLS) & set(process.cols)

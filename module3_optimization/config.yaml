@@ -32,13 +32,13 @@ tie_break: [cost, uncertainty, domain_distance, temp_c, time_hr]
 
 domain:
   enabled: true
-  source: raw_minimal # raw_minimal (analysis/load_raw.py) | processed (P1 정제 데이터, path 지정)
-  path: null
+  source: processed   # raw_minimal (analysis/load_raw.py) | processed (P1 정제 데이터, path 지정)
+  path: data/processed/batches.csv
   method: knn
   k: 5
-  percentile: 95      # 공정 조건 판정 (결정 변수 + 원료)
+  percentile: 85      # 공정 조건 판정 (결정 변수만)
   feed_percentile: 99 # 원료 자체 판정 → 밖이면 out_of_domain
-  columns: null       # null → 결정 변수 + 원료 성분
+  columns: [acid_l, temp_c, time_hr]  # 결정 변수만. 원료는 feed 판정기가 전담
 
 # 신뢰도 등급 (status=ok 일 때). high: σ 있음 + 유사 배치 ≥ high_similar,
 # medium: 유사 배치 ≥ medium_similar 또는 적용 범위 판정기 없음, 나머지 low.
