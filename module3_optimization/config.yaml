@@ -2,6 +2,14 @@
 # 목표치 · 범위 · 현장 단위 · z값 · predictor 종류를 모두 여기서 관리한다.
 # 코드에 수치를 하드코딩하지 않는다.
 
+# --all / --batch-id 가 읽을 배치 데이터.
+#   processed   : Module 1 정제본. 성분은 등급별 중앙값으로 대치됨, 공정은 NaN.
+#                 → 공정 결측만 거절한다 (Module 2 정책 C 와 동일)
+#   raw_minimal : 원본 최소 정리본. 성분 결측도 거절 (420 → 251건)
+data:
+  source: processed
+  path: data/processed/batches.csv
+
 targets:
   ni_recovery_pct: 95.0
   co_recovery_pct: 90.0
