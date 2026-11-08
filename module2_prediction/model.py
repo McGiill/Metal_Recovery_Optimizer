@@ -11,6 +11,8 @@
 성분 7개 결측은 세 정책 모두 fold 의 학습 데이터 등급별 중앙값으로 대치한다.
 """
 
+import warnings
+
 import numpy as np
 import pandas as pd
 from sklearn.dummy import DummyRegressor
@@ -120,6 +122,36 @@ class RecoveryModel:
         })
         return self
 
+    # 불확실성 추정용 보조 앙상블. 본 예측에는 쓰지 않는다.
+    UNCERTAINTY_MODELS = ("ridge", "rf", "hgb")
+
+    def fit_uncertainty(self, X: pd.DataFrame, y: pd.DataFrame, models=None) -> "RecoveryModel":
+        """서로 다른 외삽 성질을 가진 모델을 함께 학습해 둔다.
+
+        선형(ridge)은 범위 밖으로 직선을 연장하고 트리(rf/hgb)는 경계 잎값에서 멈춘다.
+        학습 데이터가 있는 곳에서는 셋이 비슷하게 답하고, 없는 곳에서는 갈린다.
+        그 흩어진 정도를 predict_std 가 모델 불확실성으로 쓴다.
+
+        CV 루프에서는 호출하지 않는다 (최종 모델에만 쓴다). train.py 참고.
+        """
+        Xi = self._inputs(X)
+        keep = self.accepts(Xi)
+        names = tuple(models or self.UNCERTAINTY_MODELS)
+        self.ensemble_ = {
+            t: [
+                Pipeline([
+                    ("impute", GradeMedianImputer(columns=tuple(
+                        C.COMPOSITION + (C.PROCESS if self.policy in ("A", "C") else [])))),
+                    ("features", FeatureBuilder(derived=tuple(C.FEATURE_SETS[self.feature_set]))),
+                    ("model", make_estimator(n)),
+                ]).fit(Xi[keep], np.asarray(y[t], dtype=float)[keep])
+                for n in names
+            ]
+            for t in C.TARGETS
+        }
+        self.ensemble_names_ = names
+        return self
+
     def predict(self, X: pd.DataFrame) -> np.ndarray:
         """shape (n, 2) 배열을 반환한다. 열 순서는 [ni_recovery_pct, co_recovery_pct].
 
@@ -134,11 +166,43 @@ class RecoveryModel:
         return out
 
     def predict_std(self, X: pd.DataFrame) -> np.ndarray:
-        """참고용 오차 척도: 시간순 CV 공정 완전 검증군의 금속별 RMSE (행마다 동일).
+        """행별 불확실성 (n, 2). 두 성분을 제곱합으로 합친다.
 
-        보정된 신뢰구간이 아니다. 학습 범위 밖·목표 부근에서 실제 오차는 더 클 수 있다.
+            sigma = sqrt(잔차 RMSE^2 + 앙상블 편차^2)
+
+        잔차 RMSE  : 데이터가 충분한 구간에서도 남는 줄일 수 없는 오차. 행마다 같다.
+        앙상블 편차 : 외삽 성질이 다른 모델들이 얼마나 갈리는가. 학습 데이터에서
+                     멀어질수록 커진다 (fit_uncertainty 참고).
+
+        fit_uncertainty 를 호출하지 않았으면 잔차 RMSE 만 쓴다(종전 동작).
+        residual_rmse_ 도 없으면 경고 후 0 을 반환한다 — 이 경우 확률 제약
+        mu - z*sigma >= 목표 가 사실상 mu >= 목표 로 약해진다.
+
+        정책 C 가 거절한 행(predict 가 NaN 을 주는 행)은 sigma 도 NaN 이다.
         """
-        std = getattr(self, "residual_rmse_", None)
-        if std is None:
-            raise AttributeError("residual_rmse_ 가 설정되지 않음 (train.py 로 저장한 모델만 제공)")
-        return np.tile(np.asarray(std, dtype=float), (len(X), 1))
+        n = len(X)
+        base = getattr(self, "residual_rmse_", None)
+        if base is None:
+            warnings.warn(
+                "residual_rmse_ 가 없어 sigma=0 을 반환한다. 확률 제약이 무력화된다. "
+                "train.py 로 학습·저장한 모델을 쓸 것.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            out = np.zeros((n, 2))
+        else:
+            out = np.tile(np.asarray(base, dtype=float), (n, 1))
+
+        ens = getattr(self, "ensemble_", None)
+        if ens:
+            Xi = self._inputs(X)
+            ok = self.accepts(Xi)
+            spread = np.zeros((n, 2))
+            if ok.any():
+                for j, t in enumerate(C.TARGETS):
+                    preds = np.stack([m.predict(Xi[ok]) for m in ens[t]])
+                    spread[ok, j] = preds.std(axis=0, ddof=0)
+            out = np.sqrt(out**2 + spread**2)
+
+        out[~self.accepts(self._inputs(X))] = np.nan
+        return out

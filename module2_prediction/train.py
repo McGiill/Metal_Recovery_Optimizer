@@ -202,6 +202,8 @@ def main() -> None:
     prim = oof[oof["process_complete"]]
     final_model.residual_rmse_ = [metrics(prim)["rmse_ni"], metrics(prim)["rmse_co"]]
     final_model.trained_rows_ = len(df)
+    # 불확실성용 보조 앙상블 (최종 모델에만. CV 루프에서는 학습하지 않는다)
+    final_model.fit_uncertainty(df, df[list(C.TARGETS)])
     C.MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(final_model, C.MODEL_PATH)
 
@@ -212,6 +214,7 @@ def main() -> None:
         "cv_final_detail": {k: v for k, v in final.items() if k.startswith("primary") or k.startswith("all_rows")},
         "test_primary": test_primary, "test_all_rows": metrics(test_pred),
         "residual_rmse_for_predict_std": final_model.residual_rmse_,
+        "uncertainty_ensemble": list(final_model.ensemble_names_),
         "model_path": str(C.MODEL_PATH.relative_to(C.ROOT)),
         "target_region_cases": int(len(goal)),
         "runtime_sec": round(time.time() - t0, 1),
