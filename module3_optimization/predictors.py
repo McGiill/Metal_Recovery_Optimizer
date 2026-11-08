@@ -26,6 +26,22 @@ TARGET_COLS = ["ni_recovery_pct", "co_recovery_pct"]
 class Predictor(Protocol):
     name: str
 
+    def _mean(self, X: pd.DataFrame):
+        """P3 의 predict_batch 가 있으면 그쪽을 쓴다.
+
+        predict_batch 는 predict 와 같은 예측에 입력 검증(성분 합 100% 초과, 공정 값
+        0 이하, 학습 범위 1~99% 밖 등)을 더해 주고, 걸린 행은 NaN 으로 돌려준다.
+        없으면 종전대로 predict 를 부른다.
+        """
+        try:
+            from module2_prediction.inference import predict_batch
+        except Exception:
+            return self.model.predict(X)
+        if not hasattr(self.model, "feature_range_"):
+            return self.model.predict(X)
+        out = predict_batch(self.model, X, mode="optimization")
+        return out[["ni_recovery_pct_pred", "co_recovery_pct_pred"]].to_numpy(dtype=float)
+
     def predict(self, X: pd.DataFrame) -> pd.DataFrame: ...
 
 
@@ -139,7 +155,7 @@ class RecoveryModelAdapter:
         return self.std_fn is not None or hasattr(self.model, "predict_std")
 
     def predict(self, X: pd.DataFrame) -> pd.DataFrame:
-        mean = np.asarray(self.model.predict(X), dtype=float)
+        mean = np.asarray(self._mean(X), dtype=float)
         if mean.shape != (len(X), 2):
             raise ValueError(
                 f"predict() 는 shape ({len(X)}, 2) 를 반환해야 한다. 받은 shape: {mean.shape}"
