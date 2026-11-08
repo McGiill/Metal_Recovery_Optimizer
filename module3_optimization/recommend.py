@@ -269,6 +269,28 @@ def recommend_all(
     return recipes, errors
 
 
+def load_batches(cfg: dict) -> pd.DataFrame:
+    """--all / --batch-id 가 읽을 배치 데이터.
+
+    기본은 Module 1 정제본(data.path)이다. 정제본은 원료 성분을 등급별 중앙값으로
+    대치하고 공정 변수는 NaN 으로 남기므로, 공정 결측만 거절하게 된다(Module 2 정책 C 와 동일).
+    data.source = raw_minimal 로 두면 종전처럼 원본 최소 정리본을 읽는다(성분 결측도 거절).
+    """
+    source = get(cfg, "data.source", "processed")
+    if source == "raw_minimal":
+        from module3_optimization.analysis.load_raw import load_minimal
+
+        return load_minimal()
+    if source != "processed":
+        raise ValueError(f"알 수 없는 data.source: {source}")
+    path = get(cfg, "data.path", "data/processed/batches.csv")
+    frame = pd.read_csv(path)
+    missing = set(FEED_COLS) - set(frame.columns)
+    if missing:
+        raise ValueError(f"{path} 에 원료 컬럼이 없다: {sorted(missing)}")
+    return frame
+
+
 def main(argv: list[str] | None = None) -> int:
     from module3_optimization import report
 
@@ -299,9 +321,7 @@ def main(argv: list[str] | None = None) -> int:
         cfg["targets"] = {**cfg["targets"], **target}
 
     if args.all or args.batch_id:
-        from module3_optimization.analysis.load_raw import load_minimal
-
-        data = load_minimal()
+        data = load_batches(cfg)
         if args.batch_id:
             data = data[data["batch_id"] == args.batch_id]
             if data.empty:

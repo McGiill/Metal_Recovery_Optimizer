@@ -62,6 +62,15 @@ FEATURE_COLS = [
 
 TARGET_COLS = ["ni_recovery_pct", "co_recovery_pct"]
 
+# 대치 대상 구분.
+#   COMPOSITION_COLS : 원료 성분. 등급이 분포를 규정하므로 등급별 중앙값이 타당하다.
+#   PROCESS_COLS     : 작업자가 설정한 공정 조건. 등급과 통계적으로 무관하므로
+#                      (Kruskal-Wallis p = 0.288 / 0.846 / 0.975) 등급별 중앙값에
+#                      근거가 없다. 기록이 없는 설정값을 만들어내지 않고 NaN 으로 둔다.
+#                      결측 위치는 imputed_<col> 플래그로 남기므로 하류에서 판단한다.
+COMPOSITION_COLS = ["ni_pct", "co_pct", "li_pct", "mn_pct", "cu_pct", "fe_pct", "al_pct"]
+PROCESS_COLS = ["feed_kg", "acid_l", "temp_c", "time_hr"]
+
 # 분석일자에 실제로 나타나는 6종 포맷. 순서대로 시도한다.
 # NN.NN.NNNN 은 DD.MM.YYYY, NN/NN/NN 은 MM/DD/YY 로 확정했다.
 # 근거: 배치ID가 날짜 오름차순이고 6종 포맷이 순환하므로
@@ -165,6 +174,15 @@ def impute(df: pd.DataFrame, strategy: str = "grade_median") -> pd.DataFrame:
     grade_median : 같은 원료등급(A/B/C) 내 중앙값. 기본값.
         등급이 성분 분포를 규정하므로(Ni 함량 평균 A 24.31 / B 18.14 / C 12.25)
         전체 중앙값으로 채우면 A급 결측이 하향 왜곡된다.
+
+    ⚠ 공정 변수(PROCESS_COLS)는 대치하지 않는다. 등급은 원료의 성질이고 공정 조건은
+      작업자의 설정이라, 등급으로 온도·시간을 추정할 근거가 없다(실측 행 기준
+      Kruskal-Wallis p = 0.288 / 0.846 / 0.975 로 등급 간 차이 없음). 결측은 NaN 으로
+      두고 imputed_<col> 플래그만 남긴다.
+
+    ⚠ 중앙값은 입력 전체 행으로 계산한다. 학습/검증을 나눠 쓸 때는 imputed_ 플래그로
+      되돌린 뒤 학습 구간만으로 다시 대치해야 한다. 그러지 않으면 검증 구간 정보가
+      학습용 대치값에 섞인다.
     median / mean : 전체 중앙값 / 평균
     drop         : 결측이 있는 행을 제거 (420 → 200행)
     """
@@ -182,6 +200,8 @@ def impute(df: pd.DataFrame, strategy: str = "grade_median") -> pd.DataFrame:
         return out.loc[keep].reset_index(drop=True)
 
     for col in numeric:
+        if col in PROCESS_COLS:
+            continue  # 공정 조건은 추정 근거가 없어 NaN 으로 둔다 (플래그는 위에서 기록됨)
         if not out[col].isna().any():
             continue
         if strategy == "grade_median":
