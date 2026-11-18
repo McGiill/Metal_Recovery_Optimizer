@@ -1,0 +1,31 @@
+# 이미지에 넣지 않는 것
+.git
+.github
+.venv
+venv
+__pycache__
+*.py[cod]
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.ipynb_checkpoints
+
+# 1GB 에셋 패키지 — 컨테이너는 쓰지 않는다
+Youngpoong/
+*.unitypackage
+*.mp4
+
+# 빌드 때 다시 만드는 산출물
+data/processed/*
+artifacts/*
+docs/modeling/standalone.html
+
+# 문서 작업물
+example/
+*.docx
+*.pdf
+.DS_Store
+**/~$*
+homework/
+.idea/
+.vscode/

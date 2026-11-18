@@ -28,6 +28,7 @@ pymoo>=0.6               # NSGA-II 다목적 최적화 / 파레토 프론티어
 fastapi>=0.110
 uvicorn[standard]>=0.29
 pydantic>=2.6
+streamlit>=1.40         # 데모 화면 (app/streamlit_app.py)
 
 # ── 코드 스타일 (머지 diff 노이즈 제거) ──────────────
 ruff>=0.4
