@@ -137,11 +137,14 @@ class RecoveryModel:
         Xi = self._inputs(X)
         keep = self.accepts(Xi)
         names = tuple(models or self.UNCERTAINTY_MODELS)
+        # 정책 B 는 공정 결측을 NaN 으로 두지만 ridge·rf 는 NaN 을 받지 못한다.
+        # 그런 멤버는 정책 A 처럼 공정 값도 학습 구간 등급별 중앙값으로 채운다.
         self.ensemble_ = {
             t: [
                 Pipeline([
                     ("impute", GradeMedianImputer(columns=tuple(
-                        C.COMPOSITION + (C.PROCESS if self.policy in ("A", "C") else [])))),
+                        C.COMPOSITION + (C.PROCESS if self.policy in ("A", "C") or n not in NAN_CAPABLE
+                                         else [])))),
                     ("features", FeatureBuilder(derived=tuple(C.FEATURE_SETS[self.feature_set]))),
                     ("model", make_estimator(n)),
                 ]).fit(Xi[keep], np.asarray(y[t], dtype=float)[keep])

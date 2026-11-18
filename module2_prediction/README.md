@@ -9,7 +9,7 @@
 python -m module1_preprocessing.cleaning        # Module 1 → data/processed/batches.csv
 python -m module2_prediction.train              # 실험·선택·평가·저장 (약 35초)
 python -m module2_prediction.inference          # predict_batch · 7:3 혼합 예시
-python -m pytest module2_prediction/tests -q    # 8개 테스트
+python -m pytest module2_prediction/tests -q    # 9개 테스트
 ```
 
 macOS 에서 LightGBM·XGBoost 는 `brew install libomp` 가 필요하다.
@@ -102,7 +102,7 @@ predictor:
 
 - `RecoveryModel.predict(X) -> ndarray (n, 2)`, 열 순서 `[ni_recovery_pct, co_recovery_pct]`. 입력은 `FEATURE_COLS` 11개, `grade` 는 선택.
 - 공정 변수(원료량·황산·온도·시간)가 빠진 행은 **NaN** 을 반환한다(정책 C). 추천 후보는 공정 값을 모두 채워 호출한다.
-- `predict_std()` 는 개발 CV 공정 완전군 RMSE(Ni 2.02, Co 2.31)를 행마다 반환한다. **보정된 신뢰구간이 아니다.**
+- `predict_std()` 는 조건별 σ 를 반환한다: √(개발 CV 공정 완전군 RMSE² + ridge·rf·hgb 예측 편차²). RMSE 는 Ni 2.02 / Co 2.31 이고, 학습 데이터에서 먼 조건일수록 편차가 커진다(`fit_uncertainty`). 예측을 거절한 행은 NaN 이다. **보정된 신뢰구간이 아니다.**
 - Ridge 는 선형이라 학습 범위 밖에서 그대로 외삽한다(예: 황산 3000L → Ni 101.6%). 예측값을 자르지 않으므로
   Module 3 의 적용 범위 판정을 반드시 켜고, `inference.predict_batch()` 의 `out_of_domain` 상태를 참고한다.
 - 목표 부근 과소 예측 경향 때문에 비용 최소 추천이 보수적으로 나올 수 있다.

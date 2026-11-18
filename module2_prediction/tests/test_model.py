@@ -61,6 +61,16 @@ def test_predict_contract_and_policy_c_rejects(df):
     assert not np.isnan(model.predict(full)).any()
 
 
+
+def test_policy_b_uncertainty_ensemble_trains(df):
+    """정책 B 모델에도 불확실성 앙상블을 붙일 수 있어야 한다 (ridge 가 NaN 에서 멈추던 결함)."""
+    m = RecoveryModel(model="hgb", policy="B", feature_set="F0").fit(df, df[C.TARGETS])
+    m.residual_rmse_ = [2.0, 2.3]
+    m.fit_uncertainty(df, df[C.TARGETS])
+    sd = m.predict_std(df.head(20))
+    assert sd.shape == (20, 2)
+    assert np.isfinite(sd).all() and (sd >= 2.0).all()
+
 def test_policy_b_requires_nan_capable_model():
     with pytest.raises(ValueError):
         RecoveryModel("ridge", "B", "F0")
