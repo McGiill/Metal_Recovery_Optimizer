@@ -12,39 +12,87 @@
 
 TODO (P5) — 과제 배경, 3개 모듈 구성, 최종 산출물 요약
 
-## 2. 환경 설정
+## 2. 빠른 실행 — Docker
+
+클론 직후 바로 된다. 별도 내려받을 것이 없다.
+
+```bash
+docker compose up --build
+```
+
+| | 주소 |
+|---|---|
+| 추천 데모 · 3D 디지털 트윈 | <http://localhost:8501> |
+| 예측 API 문서 (Swagger) | <http://localhost:8000/docs> |
+
+첫 빌드는 **5분 안팎**이다 — 의존성 설치에 더해 컨테이너 안에서
+모듈 1 전처리와 모듈 2 학습(약 52초)을 끝내고 모델을 이미지에 굽기 때문이다.
+두 번째부터는 레이어 캐시가 걸려 수십 초다.
+
+멈출 때는 `Ctrl+C`, 정리는 `docker compose down`.
+
+### 3D 씬만 따로 보기
+
+디지털 트윈은 정적 페이지라 파이썬 없이도 열린다.
+
+```bash
+python -m http.server 8000 --directory docs
+# http://localhost:8000/modeling/
+```
+
+> `docs/modeling/index.html` 을 **더블클릭하면 빈 화면이 뜬다.** 브라우저가 `file://`
+> 에서 ES 모듈과 `fetch()` 를 막기 때문이다. 위처럼 서버를 거쳐야 한다.
+> GitHub Pages(Settings → Pages → `main` / `docs`)를 켜면 주소 하나로 열린다.
+
+## 3. 직접 설치해서 쓰기
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+pip install -r requirements.txt  # 컨테이너는 requirements-runtime.txt(부분집합)를 쓴다
 pre-commit install
 ```
 
 ### 데이터 준비
 
-원본 데이터와 Unity 에셋은 용량 때문에 저장소에 포함하지 않는다.
+**원본 데이터(59KB)는 저장소에 들어 있다.** 명세 `#2` 의 레포지토리 구조가
+`data/` 에 원본 데이터를 두라고 요구하고, 개인정보가 없어서 그대로 커밋했다.
+따로 받을 필요가 없다.
+
+Unity 에셋 패키지(약 1GB)는 용량 때문에 제외한다. 3D 씬은 이 에셋 없이
+절차적으로 만들어지므로 데모를 돌리는 데 필요하지 않다.
 
 ```bash
-# 에셋 패키지 (약 1GB) 다운로드 후 압축 해제
-curl -O https://download.codyssey.kr/Youngpoong.zip
+curl -O https://download.codyssey.kr/Youngpoong.zip   # 에셋이 필요할 때만
 unzip Youngpoong.zip
-
-# 원본 데이터를 data/raw/ 로 복사
-cp Youngpoong/영풍그룹_금속회수율최적화_RawMaterialData_학생배포용.xlsx data/raw/
 ```
 
-## 3. 모듈별 실행 방법
+### 모듈별 실행 방법
 
-| 모듈 | 실행 | 담당 |
-|---|---|---|
-| Module 1 전처리 | TODO | P1 |
-| Module 1 특성공학 | TODO | P2 |
-| Module 2 예측 | TODO | P3 |
-| Module 3 최적화 | TODO | P4 |
-| 추가구현 API | TODO | P5 |
+| 단계 | 명령 | 산출물 | 담당 |
+|---|---|---|---|
+| Module 1 전처리 | `python -m module1_preprocessing.cleaning` | `data/processed/batches.csv` | P1 |
+| Module 1 특성공학 | `notebooks/02_p2_feature_analysis.ipynb` 실행 (파생 변수 비교) · `add_features()` 는 모듈 2 학습 때 자동 호출 | `data/processed/p2_analysis/` | P2 |
+| Module 2 학습·평가 | `python -m module2_prediction.train` | `artifacts/recovery_model.joblib` | P3 |
+| Module 3 추천 (1건) | `python -m module3_optimization.recommend --batch-id BP-2025-0033` | 레시피 카드 | P4 |
+| Module 3 추천 (전체) | `python -m module3_optimization.recommend --all --out artifacts/recipes.csv` | CSV | P4 |
+| 3D 씬 데이터 갱신 | `python docs/modeling/export_data.py` | `docs/modeling/data.json` | — |
+| 데모 화면 | `streamlit run app/streamlit_app.py` | <http://localhost:8501> | P5 |
+| 예측 API | `uvicorn api.main:app --port 8000` | <http://localhost:8000/docs> | P5 |
 
-TODO (P5) — 각 모듈의 실행 예시 명령과 출력 샘플
+모듈 3 는 모듈 2 의 모델을 읽으므로 **학습을 먼저 돌려야 한다.**
+
+실행 예시:
+
+```console
+$ python -m module3_optimization.recommend --batch-id BP-2025-0033
+...
+$ python -m module3_optimization.recommend --all --out artifacts/recipes.csv
+420건 저장 → artifacts/recipes.csv  {'infeasible': 381, 'ok': 39}  (입력 결측으로 건너뜀 0건)
+```
+
+420건 중 39건만 목표를 달성한다. 데이터의 성질이다 — 자세한 내용은
+[`REPORT.md`](REPORT.md) 5.5 현장 적용 가능성 참고.
 
 ## 4. 데이터셋 설명
 
@@ -83,18 +131,26 @@ TODO (P5) — 각 모듈의 실행 예시 명령과 출력 샘플
 ## 5. 저장소 구조
 
 ```
-data/raw/              원본 데이터 (git 제외)
-data/processed/        정제 결과 (git 제외)
+data/raw/              원본 .xlsx (git 포함 — 명세 #2)
+data/processed/        정제 결과 (git 제외, 모듈 1 이 만든다)
 data/fixtures/         계약 샘플 — 병렬 개발용 (git 포함)
 module1_preprocessing/ 정제 · 특성공학          P1 / P2
 module2_prediction/    예측 모델 · XAI          P3
 module3_optimization/  최적화 · 파레토          P4
 notebooks/             EDA · 모델링 과정        P2
-docs/                  계약 · 보고 자료
-api/                   추가구현 추론 API        P5
-unity/                 Unity 프로젝트           P5
+docs/                  보고 자료 · 그림
+docs/modeling/         3D 디지털 트윈 — 명세 #2-6 모델링 구현
+app/                   Streamlit 데모 화면      P5
+api/                   추론 API (명세 #8)       P5
 artifacts/             학습된 모델 등 (git 제외)
+Dockerfile             전처리→학습→데모를 한 번에 굽는다
+compose.yaml           app(8501) + api(8000)
 ```
+
+`docs/modeling/` 안에서 `index.html`·`scene.js`·`data.json` 이 실제 페이지이고,
+`export_data.py` 가 파이프라인에서 `data.json` 을 다시 만든다.
+`standalone.html` 은 Streamlit 에 끼우기 위한 단일 파일 묶음이라
+`build_standalone.py` 가 생성한다 — 직접 고치지 않는다.
 
 ## 6. 협업 규칙
 
@@ -111,4 +167,8 @@ artifacts/             학습된 모델 등 (git 제외)
 | P2 | Module 1 특성공학 + `REPORT.md` | — |
 | P3 | Module 2 예측 모델 | XAI (SHAP/LIME) |
 | P4 | Module 3 최적화 | 다목적 최적화 + 파레토 |
-| P5 | Unity 모델링 + `README.md` | 추론 API + 실시간 데모 |
+| P5 | 모델링 구현(명세 `#2-6`) + `README.md` | 추론 API + 실시간 데모 |
+
+> 명세 `#2-6` 은 **"모델링 구현"** 이라고만 쓰여 있고 도구를 지정하지 않는다.
+> 영풍 배포 에셋이 `.unitypackage` 라 Unity 로 적어 왔으나 명세에 그런 요구는 없어서,
+> 브라우저에서 바로 열리는 Three.js 로 구현했다 (`docs/modeling/`).
