@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="황산 침출 공정 디지털 트윈 — 명세 #2-6 모델링 구현">
+
+<style>
+/* 스켈레톤 없이 단독으로 열리므로 기본값을 직접 깐다 */
+html{color-scheme:light}
+body{margin:0;font:14px/1.55 system-ui,sans-serif}
+img{max-width:100%}
+[hidden]{display:none!important}
+</style>
+<title>침출 공정 디지털 트윈</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap">
+<style>
+/* 레이아웃: 좌측 공정 제어 레일 + 우측 3D 뷰포트. 아래로 애니메이션 토글과 명세 검증이 붙는다.
+   팔레트는 ISA-101 설비 HMI 관례를 따른다 — 배경은 채도를 죽인 중간 회색이고,
+   색은 장식이 아니라 상태(운전/경보/유체)에만 쓴다. */
+:root{
+  --bg:#dee2df; --panel:#eff2ef; --sunk:#d2d7d3; --line:#b6bcb8;
+  --fg:#1b211e; --muted:#5b6460; --steel:#39474c;
+  --run:#9c6500; --ok:#1d6440; --warn:#8a5600; --bad:#8f271e; --fluid:#1b656e;
+  --scene:#b9c0bd; --scene2:#9ba3a0;
+  --ui:"IBM Plex Sans KR",system-ui,-apple-system,"Apple SD Gothic Neo",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#191d1c; --panel:#232927; --sunk:#141817; --line:#3b4340;
+  --fg:#e6eae7; --muted:#949d99; --steel:#8fa0a6;
+  --run:#e0a43c; --ok:#5fba8b; --warn:#d2a04a; --bad:#e07c70; --fluid:#4fb3bd;
+  --scene:#22282a; --scene2:#171c1d;
+  color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#191d1c; --panel:#232927; --sunk:#141817; --line:#3b4340;
+  --fg:#e6eae7; --muted:#949d99; --steel:#8fa0a6;
+  --run:#e0a43c; --ok:#5fba8b; --warn:#d2a04a; --bad:#e07c70; --fluid:#4fb3bd;
+  --scene:#22282a; --scene2:#171c1d;
+  color-scheme:dark}
+
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--ui);line-height:1.55;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  padding-block:0}
+.wrap{max-width:1240px;margin:0 auto}
+
+header{padding-block:24px 14px}
+h1{margin:0 0 5px;font-size:clamp(19px,3vw,25px);font-weight:700;letter-spacing:-.02em;text-wrap:balance}
+.sub{margin:0;color:var(--muted);font-size:13.5px;max-width:64ch}
+
+/* 명세 검증 띠 — 숫자는 씬 그래프에서 실제로 세어 채운다 */
+.spec{display:flex;flex-wrap:wrap;gap:7px;margin-top:14px}
+.chip{display:flex;align-items:baseline;gap:7px;background:var(--panel);border:1px solid var(--line);
+  border-radius:3px;padding:5px 10px;font-size:11.5px}
+.chip .k{color:var(--muted);letter-spacing:.03em}
+.chip .v{font-family:var(--mono);font-weight:600;font-variant-numeric:tabular-nums}
+.chip[data-pass="1"] .v{color:var(--ok)}
+.chip[data-pass="0"] .v{color:var(--bad)}
+
+main{display:grid;grid-template-columns:minmax(0,312px) minmax(0,1fr);gap:18px;align-items:start;
+  padding-block:8px 0}
+@media(max-width:860px){main{grid-template-columns:1fr}}
+
+.card{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:14px}
+.card h2{margin:0 0 11px;font-size:11px;font-weight:600;color:var(--muted);
+  letter-spacing:.09em;text-transform:uppercase}
+
+label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
+select{width:100%;padding:7px 8px;border:1px solid var(--line);border-radius:3px;
+  background:var(--sunk);color:var(--fg);font-family:var(--mono);font-size:12px}
+.sl{margin-top:13px}
+.sl .top{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.sl .val{font-family:var(--mono);font-size:13.5px;font-weight:600;font-variant-numeric:tabular-nums}
+input[type=range]{width:100%;margin:4px 0 0;accent-color:var(--run)}
+
+.go{width:100%;margin-top:15px;padding:9px 10px;border:1px solid var(--steel);border-radius:3px;
+  background:var(--steel);color:var(--panel);font:600 13px var(--ui);cursor:pointer}
+.go:hover:not(:disabled){filter:brightness(1.15)}
+.go:disabled{opacity:.45;cursor:default}
+.gonote{margin:6px 0 0;font-size:11px;color:var(--muted);font-family:var(--mono)}
+
+.feed{margin-top:14px;padding-top:12px;border-top:1px solid var(--line);
+  display:grid;gap:2px;font-family:var(--mono);font-size:11px;color:var(--muted)}
+.feed b{color:var(--fg);font-weight:500}
+
+/* 판정 */
+.verdict{margin-top:13px;padding-top:12px;border-top:1px solid var(--line)}
+.vhead{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.pill{font-size:11px;font-weight:600;padding:2px 8px;border-radius:99px;border:1px solid currentColor}
+.pill.ok{color:var(--ok)} .pill.bad{color:var(--bad)} .pill.ref{color:var(--muted)}
+.vmsg{margin:7px 0 0;font-size:12px;color:var(--muted)}
+.rd{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:11px}
+.rd .b{background:var(--sunk);border:1px solid var(--line);border-radius:3px;padding:8px 9px}
+.rd .k{font-size:10.5px;color:var(--muted)}
+.rd .v{font-family:var(--mono);font-size:17px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.rd .d{font-family:var(--mono);font-size:10.5px;color:var(--muted)}
+
+/* 뷰포트 */
+.view{position:relative;background:var(--sunk);border:1px solid var(--line);border-radius:4px;
+  overflow:hidden;aspect-ratio:16/10}
+@media(max-width:860px){.view{aspect-ratio:4/3}}
+canvas{display:block;width:100%;height:100%}
+.hud{position:absolute;left:10px;bottom:10px;display:flex;gap:6px;flex-wrap:wrap;
+  font-family:var(--mono);font-size:10.5px}
+.hud span{background:color-mix(in srgb,var(--panel) 86%,transparent);border:1px solid var(--line);
+  border-radius:2px;padding:2px 7px;color:var(--muted);backdrop-filter:blur(3px)}
+.hud span b{color:var(--fg);font-weight:600;font-variant-numeric:tabular-nums}
+.cams{position:absolute;right:10px;top:10px;display:flex;gap:5px;flex-wrap:wrap}
+.cams button{font:600 10.5px/1 var(--mono);padding:5px 8px;border:1px solid var(--line);border-radius:2px;
+  background:color-mix(in srgb,var(--panel) 86%,transparent);color:var(--muted);cursor:pointer;
+  backdrop-filter:blur(3px)}
+.cams button[aria-pressed="true"]{color:var(--fg);border-color:var(--steel)}
+.cams button:hover{color:var(--fg)}
+
+/* 애니메이션 토글 3개 */
+.anim{display:grid;grid-template-columns:repeat(auto-fit,minmax(176px,1fr));gap:9px;margin-top:12px}
+.tog{display:flex;align-items:flex-start;gap:9px;background:var(--panel);border:1px solid var(--line);
+  border-radius:4px;padding:10px 11px;cursor:pointer}
+.tog input{margin:3px 0 0;accent-color:var(--run);flex:none}
+.tog .nm{font-size:12.5px;font-weight:600}
+.tog .ds{font-size:11px;color:var(--muted);font-family:var(--mono)}
+.tog:has(input:checked){border-color:var(--run)}
+.tog:has(input:checked) .nm{color:var(--run)}
+
+footer{padding-block:18px 30px;color:var(--muted);font-size:11.5px;max-width:78ch}
+footer code{font-family:var(--mono);background:var(--sunk);padding:1px 4px;border-radius:2px}
+.load{position:absolute;inset:0;display:grid;place-items:center;font-family:var(--mono);
+  font-size:12px;color:var(--muted)}
+@media (prefers-reduced-motion:reduce){.tog{opacity:.96}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>침출 공정 디지털 트윈</h1>
+  <p class="sub">황산 침출조를 가상 공간에 세우고, 모듈 1·2·3 파이프라인이 추천한 레시피를 그대로 운전 조건으로 넣는다.
+    치수와 수량은 아래 띠에서 씬 그래프를 직접 세어 표시한다.
+    <b>Ni 95% · Co 90% 를 동시에 넘길 수 있는 원료는 드물다</b> — 목록의 ✓ 가 달성 가능한 원료이고,
+    ✕ 는 허용 범위 안에 해가 없는 원료다(기본 목표 기준). 이 판정과 추천 레시피는 파이썬 모듈 3 이 계산한 값이다.</p>
+  <div class="spec" id="spec"></div>
+</header>
+
+<main>
+  <div class="card">
+    <h2>운전 조건</h2>
+    <label for="batch">투입 원료</label>
+    <select id="batch"></select>
+
+    <div class="sl"><div class="top"><label for="acid">황산 투입량</label><span class="val" id="vacid">—</span></div>
+      <input type="range" id="acid" min="400" max="1500" step="10"></div>
+    <div class="sl"><div class="top"><label for="temp">침출 온도</label><span class="val" id="vtemp">—</span></div>
+      <input type="range" id="temp" min="40" max="95" step="1"></div>
+    <div class="sl"><div class="top"><label for="time">침출 시간</label><span class="val" id="vtime">—</span></div>
+      <input type="range" id="time" min="1" max="8" step="0.5"></div>
+
+    <button class="go" id="go" type="button">모듈 3 추천 레시피 적용</button>
+    <p class="gonote" id="gonote">파이썬 파이프라인이 격자 93,240점을 평가해 미리 구한 해다.</p>
+
+    <div class="feed" id="feed"></div>
+
+    <div class="verdict">
+      <div class="vhead"><span class="pill" id="vpill">—</span><strong id="vtitle" style="font-size:13px">—</strong></div>
+      <p class="vmsg" id="vmsg"></p>
+      <div class="rd" id="rd"></div>
+    </div>
+  </div>
+
+  <div>
+    <div class="view">
+      <canvas id="c"></canvas>
+      <div class="load" id="load">씬 구성 중…</div>
+      <div class="cams" id="cams"></div>
+      <div class="hud" id="hud"></div>
+    </div>
+    <div class="anim" id="anim"></div>
+  </div>
+</main>
+
+<footer>
+  <b>목표 달성 판정은 파이썬 모듈 3 의 결과만 싣는다</b> — 원료 목록의 ✓/✕ 와, 「모듈 3 추천 레시피 적용」으로 옮긴 조건의 판정이다.
+  슬라이더로 다른 조건을 고르면 회수율 평균 · 산 비율 · 적용 범위 거리만 계산해 보여 주고, 비율이나 적용 범위를 벗어난 경우만 거절로 표시한다(그 밖은 「참고」).
+  회수율 평균과 적용 범위 거리는 파이썬과 소수점 넷째 자리까지 일치하지만, 확률 제약 <code>μ − 1.28σ ≥ 목표</code> 에 쓰는 불확실성 σ 는
+  트리 앙상블이 필요해 브라우저에서 정확히 계산할 수 없기 때문이다. 임의 조건의 정확한 판정은 Streamlit 데모(<code>docker compose up</code> → localhost:8501)에서 본다.
+  액위는 황산 투입량, 액체 색은 침출 온도, 교반기는 운전 상태를 따른다.
+</footer>
+</div>
+
+<script type="module" src="./scene.js"></script>
+</body>
+</html>
