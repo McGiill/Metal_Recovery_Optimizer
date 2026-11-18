@@ -2,10 +2,10 @@
 
     streamlit run app/streamlit_app.py
 
-정적 3D 페이지(docs/modeling/)와 달리 여기서는 **파이썬 모델이 직접 돈다**.
-자바스크립트 이식본이 아니라 module3_optimization.recommend() 를 그대로 호출하므로
-트리 앙상블 sigma, 두 개의 적용 범위 판정기, 비율 제약이 전부 실물이다.
-3D 씬은 화면 아래에 끼워 넣고, 파이썬이 계산한 추천 조건을 초기 상태로 넘긴다.
+module3_optimization.recommend() 를 그대로 호출하므로 트리 앙상블 sigma,
+두 개의 적용 범위 판정기, 비율 제약이 전부 실물이다.
+3D 화면(docs/modeling/index.html, P5)은 아래에 끼워 넣는다. 목표 달성(ok) 추천이
+나오면 Module 3 JSON 을 원료 정보와 묶어 window.__TWIN_INPUT__ 으로 넘긴다.
 """
 
 from __future__ import annotations
@@ -27,8 +27,8 @@ from module3_optimization.domain import build_domains  # noqa: E402
 from module3_optimization.problem import InputError  # noqa: E402
 from module3_optimization.recommend import feed_from_row, load_batches, recommend  # noqa: E402
 
-SCENE = ROOT / "docs/modeling/standalone.html"
-SCENE_DATA = ROOT / "docs/modeling/data.json"
+SCENE = ROOT / "docs/modeling/index.html"
+EVIDENCE_COLS = ("acid_l", "temp_c", "time_hr", "ni_recovery_pct", "co_recovery_pct")
 
 st.set_page_config(page_title="금속 회수율 최적화", page_icon="⚗", layout="wide")
 
@@ -41,16 +41,20 @@ def boot():
     return cfg, batches, process_dom, feed_dom
 
 
-@st.cache_data
-def scene_batch_ids() -> list[str]:
-    """3D 씬에 담긴 표본 배치. 씬에 없는 배치는 초기 상태로 넘겨도 소용없다."""
-    if not SCENE_DATA.exists():
-        return []
-    return [b["batch_id"] for b in json.loads(SCENE_DATA.read_text(encoding="utf-8"))["batches"]]
+def twin_input(r: dict, row: pd.Series) -> dict:
+    """3D 화면(P5)이 읽는 입력 묶음 — 원료 정보 + 실측 근거 + Module 3 JSON 그대로."""
+    evidence = {c: float(row[c]) for c in EVIDENCE_COLS if pd.notna(row.get(c))}
+    return {
+        "scenario_name": f"{r['batch_id']} — Module 3 추천",
+        "feed": feed_from_row(row),
+        # 공정 값이 빈 배치는 실측 근거를 싣지 않는다 (화면이 빈 칸을 그대로 찍는다)
+        "evidence": ({"source": "원본 데이터 실측", **evidence}
+                     if len(evidence) == len(EVIDENCE_COLS) else None),
+        "recipe": r,
+    }
 
 
 cfg, batches, process_dom, feed_dom = boot()
-ids = scene_batch_ids()
 
 st.title("황산 침출 — 최적 공정 레시피 추천")
 st.caption(
@@ -63,11 +67,7 @@ left, right = st.columns([1, 1.6], gap="large")
 
 with left:
     st.subheader("원료")
-    only_scene = st.checkbox("3D 씬에 담긴 배치만 보기", value=bool(ids),
-                             help="체크를 풀면 420건 전체에서 고를 수 있다. "
-                                  "씬에 없는 배치는 아래 3D 화면에 반영되지 않는다.")
-    pool = batches[batches["batch_id"].isin(ids)] if (only_scene and ids) else batches
-    bid = st.selectbox("배치", pool["batch_id"].tolist())
+    bid = st.selectbox("배치", batches["batch_id"].tolist())
     row = batches[batches["batch_id"] == bid].iloc[0]
 
     imp = sum(float(row[c]) for c in ("cu_pct", "fe_pct", "al_pct"))
@@ -144,30 +144,26 @@ with right:
 st.divider()
 st.subheader("공정 디지털 트윈")
 st.caption(
-    "명세 #2-6 모델링 구현 — 공장 25m×17m×6m · 맵 1 · 설비 1 · 애니메이션 3 · 광석 3. "
-    "드래그로 회전, 휠로 확대. 위에서 추천이 나오면 그 조건과 판정이 초기 상태로 들어간다."
+    "명세 #2-6 모델링 구현 (P5) — 공장 25m×17m×6m · 맵 1 · 설비 1 · 애니메이션 3 · 광석 3. "
+    "드래그로 회전, 휠로 확대, 설비를 누르면 정보가 나온다."
 )
 
 if not SCENE.exists():
-    st.error(
-        "docs/modeling/standalone.html 이 없다. 먼저 만든다:\n\n"
-        "    python docs/modeling/export_data.py\n"
-        "    python docs/modeling/build_standalone.py"
-    )
+    st.error("docs/modeling/index.html 이 없다.")
 else:
     html = SCENE.read_text(encoding="utf-8")
     r = st.session_state.recipe if st.session_state.recipe_key == key else None
-    if r and r.get("recipe") and bid in ids:
-        override = {
-            "batch_id": bid,
-            "a": r["recipe"]["acid_l"], "t": r["recipe"]["temp_c"], "h": r["recipe"]["time_hr"],
-            "ok": r["status"] == "ok",
-            "gap": max(r["shortfall"].values()) if r.get("shortfall") else None,
-            "ni_target": ni_min, "co_target": co_min,
-        }
-        inject = f"<script>window.__TWIN_OPENING__={json.dumps(override)};</script>"
-        html = html.replace("</head>", inject + "\n</head>", 1)
-    components.html(html, height=900, scrolling=True)
+    if r and r["status"] == "ok":
+        # </script> 가 문자열 안에 있어도 태그가 닫히지 않게 </ 를 이스케이프한다
+        payload = json.dumps(twin_input(r, row), ensure_ascii=False).replace("</", "<\\/")
+        html = html.replace("</head>", f"<script>window.__TWIN_INPUT__ = {payload};</script>\n</head>", 1)
+        st.caption(f"위 추천 결과({bid})가 3D 화면에 들어가 있다.")
+    else:
+        st.caption(
+            "3D 화면은 기본 데모 입력(BP-2025-0074 가정값)을 보여 준다. 목표 달성 레시피가 나오면 "
+            "그 결과로 바뀐다. 목표 미달 · 범위 밖 결과의 화면 표시는 P5 작업 예정이다."
+        )
+    components.html(html, height=780, scrolling=False)
 
 st.divider()
 st.caption(

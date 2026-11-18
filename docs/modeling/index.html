@@ -2,191 +2,1824 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="description" content="황산 침출 공정 디지털 트윈 — 명세 #2-6 모델링 구현">
-
-<style>
-/* 스켈레톤 없이 단독으로 열리므로 기본값을 직접 깐다 */
-html{color-scheme:light}
-body{margin:0;font:14px/1.55 system-ui,sans-serif}
-img{max-width:100%}
-[hidden]{display:none!important}
-</style>
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>침출 공정 디지털 트윈</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap">
+<!--
+  Module 4 — 디지털 트윈 시연 화면 (데모)
+  소유자: P5 (이희승) · 명세: MODULE4_DEMO_SPEC.md v2
+  입력값은 Module 3 출력을 가정한 고정값(DEMO_INPUT, 명세 4장)이다. 실제 추천 수치가 아니다.
+  통합 수정(2026-11-18): window.__TWIN_INPUT__ 이 있으면 DEMO_INPUT 대신 읽는다.
+  Streamlit 데모(app/streamlit_app.py)가 목표 달성(status ok) 추천을 이 형식({feed, evidence, recipe})으로 넘긴다.
+-->
 <style>
-/* 레이아웃: 좌측 공정 제어 레일 + 우측 3D 뷰포트. 아래로 애니메이션 토글과 명세 검증이 붙는다.
-   팔레트는 ISA-101 설비 HMI 관례를 따른다 — 배경은 채도를 죽인 중간 회색이고,
-   색은 장식이 아니라 상태(운전/경보/유체)에만 쓴다. */
-:root{
-  --bg:#dee2df; --panel:#eff2ef; --sunk:#d2d7d3; --line:#b6bcb8;
-  --fg:#1b211e; --muted:#5b6460; --steel:#39474c;
-  --run:#9c6500; --ok:#1d6440; --warn:#8a5600; --bad:#8f271e; --fluid:#1b656e;
-  --scene:#b9c0bd; --scene2:#9ba3a0;
-  --ui:"IBM Plex Sans KR",system-ui,-apple-system,"Apple SD Gothic Neo",sans-serif;
-  --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
-  color-scheme:light;
-}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
-  --bg:#191d1c; --panel:#232927; --sunk:#141817; --line:#3b4340;
-  --fg:#e6eae7; --muted:#949d99; --steel:#8fa0a6;
-  --run:#e0a43c; --ok:#5fba8b; --warn:#d2a04a; --bad:#e07c70; --fluid:#4fb3bd;
-  --scene:#22282a; --scene2:#171c1d;
-  color-scheme:dark}}
-:root[data-theme="dark"]{
-  --bg:#191d1c; --panel:#232927; --sunk:#141817; --line:#3b4340;
-  --fg:#e6eae7; --muted:#949d99; --steel:#8fa0a6;
-  --run:#e0a43c; --ok:#5fba8b; --warn:#d2a04a; --bad:#e07c70; --fluid:#4fb3bd;
-  --scene:#22282a; --scene2:#171c1d;
-  color-scheme:dark}
+  :root {
+    --bg: #0f1317; --panel: #161b21; --panel2: #1c232b; --line: #2a333d;
+    --text: #e6ebf0; --muted: #94a0ac; --faint: #64707c;
+    --ok: #2f9e44; --warn: #e8590c; --bad: #c92a2a; --none: #868e96;
+    --pred: #4dabf7; --derived: #66d9e8; --meas: #adb5bd; --accent: #fcc419;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif; font-size: 13px; }
+  #app { display: grid; grid-template-columns: 1fr 360px; grid-template-rows: 48px 1fr 56px; height: 100vh; min-height: 560px; }
 
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--ui);line-height:1.55;
-  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
-  padding-block:0}
-.wrap{max-width:1240px;margin:0 auto}
+  /* 상단 배너 */
+  #banner { grid-column: 1 / 3; display: flex; align-items: center; gap: 16px; padding: 0 16px;
+    background: var(--panel); border-bottom: 1px solid var(--line); }
+  #statusPill { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px;
+    padding: 5px 12px; border-radius: 6px; border: 1px solid var(--none); color: var(--none); }
+  #statusPill.ok { border-color: var(--ok); color: #8ce99a; background: rgba(47,158,68,.12); }
+  #batchInfo { color: var(--muted); }
+  #batchInfo b { color: var(--text); }
+  #devNotice { margin-left: auto; color: var(--accent); font-weight: 600; }
+  #title { color: var(--faint); font-size: 12px; }
 
-header{padding-block:24px 14px}
-h1{margin:0 0 5px;font-size:clamp(19px,3vw,25px);font-weight:700;letter-spacing:-.02em;text-wrap:balance}
-.sub{margin:0;color:var(--muted);font-size:13.5px;max-width:64ch}
+  /* 3D 화면 */
+  #viewport { position: relative; overflow: hidden; background: #111519; }
+  #viewport canvas { display: block; }
+  #perfBadge { position: absolute; top: 10px; right: 10px; padding: 3px 8px; border-radius: 4px;
+    background: rgba(232,89,12,.85); font-size: 11px; z-index: 5; }
+  #fatal { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: rgba(15,19,23,.94); font-size: 15px; color: #ffa8a8; z-index: 20; padding: 24px; text-align: center; }
+  #hint { position: absolute; left: 12px; bottom: 10px; color: var(--faint); font-size: 11px; z-index: 4; pointer-events: none; }
+  #debugPanel { position: absolute; left: 12px; top: 12px; width: 260px; padding: 10px 12px; z-index: 6;
+    background: rgba(22,27,33,.94); border: 1px dashed var(--accent); border-radius: 6px; }
+  #debugPanel h4 { margin: 0 0 4px; color: var(--accent); font-size: 12px; }
+  #debugPanel p { margin: 0 0 8px; color: var(--muted); font-size: 11px; }
+  #debugPanel label { display: grid; grid-template-columns: 52px 1fr 56px; align-items: center; gap: 6px; margin: 4px 0; font-size: 12px; }
+  #debugPanel output { text-align: right; color: var(--text); }
 
-/* 명세 검증 띠 — 숫자는 씬 그래프에서 실제로 세어 채운다 */
-.spec{display:flex;flex-wrap:wrap;gap:7px;margin-top:14px}
-.chip{display:flex;align-items:baseline;gap:7px;background:var(--panel);border:1px solid var(--line);
-  border-radius:3px;padding:5px 10px;font-size:11.5px}
-.chip .k{color:var(--muted);letter-spacing:.03em}
-.chip .v{font-family:var(--mono);font-weight:600;font-variant-numeric:tabular-nums}
-.chip[data-pass="1"] .v{color:var(--ok)}
-.chip[data-pass="0"] .v{color:var(--bad)}
+  /* 3D 라벨 (CSS2D) */
+  .lbl { padding: 2px 7px; border-radius: 4px; font-size: 11px; white-space: nowrap; line-height: 1.45;
+    background: rgba(13,17,21,.82); border: 1px solid #34404c; color: #dfe6ec; }
+  .lbl b { color: #fff; }
+  .lbl.key { border-color: var(--accent); }
+  .lbl.live { font-variant-numeric: tabular-nums; }
+  .lbl.grade-A { border-left: 4px solid #3b5bdb; }
+  .lbl.grade-B { border-left: 4px solid #f08c00; }
+  .lbl.grade-C { border-left: 4px solid #862e9c; }
+  .lbl.current { box-shadow: 0 0 0 1px var(--accent); }
+  .lbl .sub { color: var(--muted); }
 
-main{display:grid;grid-template-columns:minmax(0,312px) minmax(0,1fr);gap:18px;align-items:start;
-  padding-block:8px 0}
-@media(max-width:860px){main{grid-template-columns:1fr}}
+  /* 오른쪽 패널 */
+  #side { grid-row: 2; grid-column: 2; overflow-y: auto; background: var(--panel); border-left: 1px solid var(--line);
+    padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+  .card { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+  #recipeCard { border-color: var(--ok); }
+  .card h3 { margin: 0 0 8px; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+  .card h3 .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--ok); }
+  .sec { padding: 8px 0; border-top: 1px solid var(--line); }
+  .sec:first-of-type { border-top: 0; padding-top: 0; }
+  .sec-h { color: var(--muted); font-size: 11px; margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
+  .row { display: flex; justify-content: space-between; gap: 8px; margin: 2px 0; }
+  .row span { color: var(--muted); }
+  .mono { font-variant-numeric: tabular-nums; }
+  .big3 { display: grid; grid-template-columns: 1.2fr 1fr 1fr; gap: 6px; }
+  .big3 > div { background: #141a20; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+  .big3 small { display: block; color: var(--muted); font-size: 11px; }
+  .big3 b { font-size: 20px; font-variant-numeric: tabular-nums; }
+  .big3 em { display: block; font-style: normal; color: var(--muted); font-size: 11px; }
+  .badge { font-size: 10px; padding: 1px 6px; border-radius: 9px; font-weight: 700; letter-spacing: .02em; }
+  .badge.pred { background: rgba(77,171,247,.18); color: var(--pred); border: 1px solid rgba(77,171,247,.5); }
+  .badge.derived { background: rgba(102,217,232,.12); color: var(--derived); border: 1px solid rgba(102,217,232,.45); }
+  .badge.meas { background: rgba(173,181,189,.14); color: var(--meas); border: 1px solid rgba(173,181,189,.45); }
+  .rec { margin: 6px 0; }
+  .rec .top { display: flex; justify-content: space-between; }
+  .rec .top b { font-size: 15px; font-variant-numeric: tabular-nums; }
+  .rec .ci { color: var(--muted); font-size: 11px; }
+  .ibar { position: relative; height: 8px; margin-top: 4px; background: #11161b; border: 1px solid var(--line); border-radius: 4px; }
+  .ibar .band { position: absolute; top: 0; bottom: 0; background: rgba(77,171,247,.35); border-radius: 3px; }
+  .ibar .mean { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--pred); }
+  .ibar .tgt { position: absolute; top: -4px; bottom: -4px; width: 0; border-left: 2px dashed var(--accent); }
+  .ibar-scale { display: flex; justify-content: space-between; color: var(--faint); font-size: 10px; margin-top: 2px; }
+  .note { margin-top: 8px; padding: 8px; border-radius: 6px; background: rgba(252,196,25,.07); border: 1px solid rgba(252,196,25,.3);
+    color: #e9d8a6; font-size: 11px; line-height: 1.5; }
+  .muted { color: var(--muted); }
+  #equipBody .eq-name { font-weight: 700; font-size: 13px; margin-bottom: 4px; }
+  #equipBody .eq-role { color: #cfd6dd; line-height: 1.5; margin-bottom: 6px; }
+  #equipBody .eq-live { font-variant-numeric: tabular-nums; line-height: 1.6; }
+  #equipBody .eq-src { color: var(--faint); font-size: 11px; margin-top: 6px; line-height: 1.45; }
+  .tag { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 9px; margin-left: 4px; vertical-align: 1px; }
+  .tag.linked { background: rgba(47,158,68,.18); color: #8ce99a; border: 1px solid rgba(47,158,68,.5); }
+  .tag.ref { background: rgba(134,142,150,.15); color: var(--meas); border: 1px solid rgba(134,142,150,.4); }
+  .tag.data { background: rgba(102,217,232,.12); color: var(--derived); border: 1px solid rgba(102,217,232,.4); }
+  .btns { display: flex; flex-wrap: wrap; gap: 6px; }
+  button { font: inherit; color: var(--text); background: #232b34; border: 1px solid #36414d; border-radius: 5px;
+    padding: 5px 10px; cursor: pointer; }
+  button:hover { background: #2b3540; }
+  button.on { border-color: var(--accent); color: var(--accent); }
+  .ctrl-h { color: var(--muted); font-size: 11px; margin: 8px 0 4px; }
+  .ctrl-h:first-child { margin-top: 0; }
 
-.card{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:14px}
-.card h2{margin:0 0 11px;font-size:11px;font-weight:600;color:var(--muted);
-  letter-spacing:.09em;text-transform:uppercase}
-
-label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
-select{width:100%;padding:7px 8px;border:1px solid var(--line);border-radius:3px;
-  background:var(--sunk);color:var(--fg);font-family:var(--mono);font-size:12px}
-.sl{margin-top:13px}
-.sl .top{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
-.sl .val{font-family:var(--mono);font-size:13.5px;font-weight:600;font-variant-numeric:tabular-nums}
-input[type=range]{width:100%;margin:4px 0 0;accent-color:var(--run)}
-
-.go{width:100%;margin-top:15px;padding:9px 10px;border:1px solid var(--steel);border-radius:3px;
-  background:var(--steel);color:var(--panel);font:600 13px var(--ui);cursor:pointer}
-.go:hover:not(:disabled){filter:brightness(1.15)}
-.go:disabled{opacity:.45;cursor:default}
-.gonote{margin:6px 0 0;font-size:11px;color:var(--muted);font-family:var(--mono)}
-
-.feed{margin-top:14px;padding-top:12px;border-top:1px solid var(--line);
-  display:grid;gap:2px;font-family:var(--mono);font-size:11px;color:var(--muted)}
-.feed b{color:var(--fg);font-weight:500}
-
-/* 판정 */
-.verdict{margin-top:13px;padding-top:12px;border-top:1px solid var(--line)}
-.vhead{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.pill{font-size:11px;font-weight:600;padding:2px 8px;border-radius:99px;border:1px solid currentColor}
-.pill.ok{color:var(--ok)} .pill.bad{color:var(--bad)} .pill.ref{color:var(--muted)}
-.vmsg{margin:7px 0 0;font-size:12px;color:var(--muted)}
-.rd{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:11px}
-.rd .b{background:var(--sunk);border:1px solid var(--line);border-radius:3px;padding:8px 9px}
-.rd .k{font-size:10.5px;color:var(--muted)}
-.rd .v{font-family:var(--mono);font-size:17px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
-.rd .d{font-family:var(--mono);font-size:10.5px;color:var(--muted)}
-
-/* 뷰포트 */
-.view{position:relative;background:var(--sunk);border:1px solid var(--line);border-radius:4px;
-  overflow:hidden;aspect-ratio:16/10}
-@media(max-width:860px){.view{aspect-ratio:4/3}}
-canvas{display:block;width:100%;height:100%}
-.hud{position:absolute;left:10px;bottom:10px;display:flex;gap:6px;flex-wrap:wrap;
-  font-family:var(--mono);font-size:10.5px}
-.hud span{background:color-mix(in srgb,var(--panel) 86%,transparent);border:1px solid var(--line);
-  border-radius:2px;padding:2px 7px;color:var(--muted);backdrop-filter:blur(3px)}
-.hud span b{color:var(--fg);font-weight:600;font-variant-numeric:tabular-nums}
-.cams{position:absolute;right:10px;top:10px;display:flex;gap:5px;flex-wrap:wrap}
-.cams button{font:600 10.5px/1 var(--mono);padding:5px 8px;border:1px solid var(--line);border-radius:2px;
-  background:color-mix(in srgb,var(--panel) 86%,transparent);color:var(--muted);cursor:pointer;
-  backdrop-filter:blur(3px)}
-.cams button[aria-pressed="true"]{color:var(--fg);border-color:var(--steel)}
-.cams button:hover{color:var(--fg)}
-
-/* 애니메이션 토글 3개 */
-.anim{display:grid;grid-template-columns:repeat(auto-fit,minmax(176px,1fr));gap:9px;margin-top:12px}
-.tog{display:flex;align-items:flex-start;gap:9px;background:var(--panel);border:1px solid var(--line);
-  border-radius:4px;padding:10px 11px;cursor:pointer}
-.tog input{margin:3px 0 0;accent-color:var(--run);flex:none}
-.tog .nm{font-size:12.5px;font-weight:600}
-.tog .ds{font-size:11px;color:var(--muted);font-family:var(--mono)}
-.tog:has(input:checked){border-color:var(--run)}
-.tog:has(input:checked) .nm{color:var(--run)}
-
-footer{padding-block:18px 30px;color:var(--muted);font-size:11.5px;max-width:78ch}
-footer code{font-family:var(--mono);background:var(--sunk);padding:1px 4px;border-radius:2px}
-.load{position:absolute;inset:0;display:grid;place-items:center;font-family:var(--mono);
-  font-size:12px;color:var(--muted)}
-@media (prefers-reduced-motion:reduce){.tog{opacity:.96}}
+  /* 하단 공정 진행 */
+  #progress { grid-column: 1 / 3; display: flex; align-items: center; gap: 14px; padding: 0 16px;
+    background: var(--panel); border-top: 1px solid var(--line); }
+  .steps { display: flex; align-items: center; gap: 6px; }
+  .step { padding: 4px 10px; border-radius: 5px; color: var(--faint); border: 1px solid var(--line); white-space: nowrap; }
+  .step.active { color: #10151a; background: var(--accent); border-color: var(--accent); font-weight: 700; }
+  .step.done { color: var(--muted); border-color: #3a4652; }
+  .arrow { color: var(--faint); }
+  #barWrap { flex: 1; min-width: 160px; }
+  #bar { height: 10px; background: #11161b; border: 1px solid var(--line); border-radius: 5px; overflow: hidden; }
+  #barFill { height: 100%; width: 0; background: linear-gradient(90deg, #2f8f6a, #3fb8a5); }
+  #progText { margin-top: 3px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  #progText b { color: var(--text); }
 </style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
 </head>
 <body>
-<div class="wrap">
-<header>
-  <h1>침출 공정 디지털 트윈</h1>
-  <p class="sub">황산 침출조를 가상 공간에 세우고, 모듈 1·2·3 파이프라인이 추천한 레시피를 그대로 운전 조건으로 넣는다.
-    치수와 수량은 아래 띠에서 씬 그래프를 직접 세어 표시한다.
-    <b>Ni 95% · Co 90% 를 동시에 넘길 수 있는 원료는 드물다</b> — 목록의 ✓ 가 달성 가능한 원료이고,
-    ✕ 는 허용 범위 안에 해가 없는 원료다(기본 목표 기준). 이 판정과 추천 레시피는 파이썬 모듈 3 이 계산한 값이다.</p>
-  <div class="spec" id="spec"></div>
-</header>
+<div id="app">
+  <header id="banner">
+    <div id="statusPill"><span id="statusIcon">●</span><span id="statusText">불러오는 중</span></div>
+    <div id="batchInfo"></div>
+    <div id="title">영풍 34_DT · 습식 침출 공정 디지털 트윈 (교육용 재구성)</div>
+    <div id="devNotice" hidden>※ 데모 가정값 — 실제 추천 수치가 아님</div>
+  </header>
 
-<main>
-  <div class="card">
-    <h2>운전 조건</h2>
-    <label for="batch">투입 원료</label>
-    <select id="batch"></select>
+  <main id="viewport">
+    <div id="perfBadge" hidden>성능 모드 (블룸 · 그림자 끔)</div>
+    <div id="fatal" hidden></div>
+    <div id="debugPanel" hidden></div>
+    <div id="hint">드래그: 회전 · 휠: 확대 · 우클릭 드래그: 이동 · 설비 클릭: 정보</div>
+  </main>
 
-    <div class="sl"><div class="top"><label for="acid">황산 투입량</label><span class="val" id="vacid">—</span></div>
-      <input type="range" id="acid" min="400" max="1500" step="10"></div>
-    <div class="sl"><div class="top"><label for="temp">침출 온도</label><span class="val" id="vtemp">—</span></div>
-      <input type="range" id="temp" min="40" max="95" step="1"></div>
-    <div class="sl"><div class="top"><label for="time">침출 시간</label><span class="val" id="vtime">—</span></div>
-      <input type="range" id="time" min="1" max="8" step="0.5"></div>
+  <aside id="side">
+    <section class="card" id="recipeCard"><div class="muted">레시피를 불러오는 중…</div></section>
+    <section class="card" id="equipCard">
+      <h3>설비 정보</h3>
+      <div id="equipBody" class="muted">3D 화면에서 설비를 클릭하세요.</div>
+    </section>
+    <section class="card">
+      <div class="ctrl-h">카메라</div>
+      <div class="btns" id="camBtns">
+        <button data-cam="top">위</button>
+        <button data-cam="front">정면</button>
+        <button data-cam="diagonal">대각선</button>
+        <button data-cam="reactor">반응조</button>
+        <button data-cam="recovery">회수 구역</button>
+      </div>
+      <div class="ctrl-h">표시</div>
+      <div class="btns">
+        <button id="btnCut" class="on">단면 보기</button>
+        <button id="btnLabels" class="on">라벨</button>
+      </div>
+    </section>
+  </aside>
 
-    <button class="go" id="go" type="button">모듈 3 추천 레시피 적용</button>
-    <p class="gonote" id="gonote">파이썬 파이프라인이 격자 93,240점을 평가해 미리 구한 해다.</p>
-
-    <div class="feed" id="feed"></div>
-
-    <div class="verdict">
-      <div class="vhead"><span class="pill" id="vpill">—</span><strong id="vtitle" style="font-size:13px">—</strong></div>
-      <p class="vmsg" id="vmsg"></p>
-      <div class="rd" id="rd"></div>
+  <footer id="progress">
+    <div class="steps">
+      <span class="step" id="step-FEEDING">투입</span><span class="arrow">▶</span>
+      <span class="step" id="step-HEATING">가열</span><span class="arrow">▶</span>
+      <span class="step" id="step-LEACHING">침출</span><span class="arrow">▶</span>
+      <span class="step" id="step-DISCHARGE">배출·회수</span>
     </div>
-  </div>
-
-  <div>
-    <div class="view">
-      <canvas id="c"></canvas>
-      <div class="load" id="load">씬 구성 중…</div>
-      <div class="cams" id="cams"></div>
-      <div class="hud" id="hud"></div>
+    <div id="barWrap">
+      <div id="bar"><div id="barFill"></div></div>
+      <div id="progText">대기</div>
     </div>
-    <div class="anim" id="anim"></div>
-  </div>
-</main>
-
-<footer>
-  <b>목표 달성 판정은 파이썬 모듈 3 의 결과만 싣는다</b> — 원료 목록의 ✓/✕ 와, 「모듈 3 추천 레시피 적용」으로 옮긴 조건의 판정이다.
-  슬라이더로 다른 조건을 고르면 회수율 평균 · 산 비율 · 적용 범위 거리만 계산해 보여 주고, 비율이나 적용 범위를 벗어난 경우만 거절로 표시한다(그 밖은 「참고」).
-  회수율 평균과 적용 범위 거리는 파이썬과 소수점 넷째 자리까지 일치하지만, 확률 제약 <code>μ − 1.28σ ≥ 목표</code> 에 쓰는 불확실성 σ 는
-  트리 앙상블이 필요해 브라우저에서 정확히 계산할 수 없기 때문이다. 임의 조건의 정확한 판정은 Streamlit 데모(<code>docker compose up</code> → localhost:8501)에서 본다.
-  액위는 황산 투입량, 액체 색은 침출 온도, 교반기는 운전 상태를 따른다.
-</footer>
+    <div class="btns">
+      <button id="btnPause">⏸ 일시정지</button>
+      <button id="btnSpeed1" class="on">1x</button>
+      <button id="btnSpeed4">4x</button>
+    </div>
+  </footer>
 </div>
 
-<script type="module" src="./scene.js"></script>
+<script>
+  // CDN 로드 실패 감시: 모듈 스크립트가 시작되지 않으면 안내 (명세 10장)
+  window.__booted = false;
+  setTimeout(function () {
+    if (!window.__booted) {
+      var f = document.getElementById('fatal');
+      f.hidden = false;
+      f.textContent = '3D 라이브러리를 불러오지 못했습니다 — 인터넷 연결을 확인하세요.';
+    }
+  }, 15000);
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
+
+window.__booted = true;
+
+// =====================================================================
+// 1. 설정 — 모든 수치는 여기에만 둔다 (명세 9.5)
+// =====================================================================
+const FACTORY = { w: 25, d: 17, h: 6 };                       // m, 공장 내부 치수
+const BOUNDS = { acid_l: [400, 1500], temp_c: [40, 95], time_hr: [1, 8] }; // Module 3 config.yaml decision_variables
+const SEC_PER_HR = 2;          // 공정 1시간 = 화면 2초
+const FEED_SEC = 8;            // 투입 단계 길이
+const DISCHARGE_SEC = 6;       // 배출·회수 단계 길이
+const AMBIENT_C = 25;          // 투입 시 침출액 온도
+const MOLAR = { Ni: 58.69, Co: 58.93, NiSO4_6H2O: 262.85, CoSO4_7H2O: 281.10 }; // g/mol
+const GRADE_COUNT = { A: 148, B: 162, C: 110 };               // 원본 420행 (중복 4건 제거 후)
+const GRADE_TOTAL = 420;
+const PILE_COUNT = { A: 7, B: 8, C: 5 };                      // 20개 기준 비례 (명세 4.5)
+const PILE_POS = { A: [-10.5, -4], B: [-10.5, -0.5], C: [-10.5, 3] };
+const GRADE_STATS = {                                          // 원본 데이터 등급별 중앙값 · 실측 최대 (명세 4.5)
+  A: { median: 'Ni 24.3 · Co 11.0 · 불순물 합 2.5 wt%', max: 'Ni 97.8 / Co 93.6' },
+  B: { median: 'Ni 18.2 · Co 7.7 · 불순물 합 6.0 wt%', max: 'Ni 98.8 / Co 91.2' },
+  C: { median: 'Ni 12.2 · Co 5.0 · 불순물 합 11.1 wt%', max: 'Ni 91.0 / Co 83.2' },
+};
+const COLORS = {
+  grade: { A: 0x3b5bdb, B: 0xf08c00, C: 0x862e9c, none: 0x868e96 },
+  powder: 0x1a1a1a,
+  acid: 0x9fb8a8,          // 투입 직후 묽은 황산
+  slurry: 0x2b2f2d,        // 블랙파우더가 섞인 슬러리
+  liquidLow: 0x3d6e5c,     // 침출 초기
+  liquidHigh: 0x2f8f6a,    // Ni²⁺ 녹색 침출액
+  niSulfate: 0x3fb8a5,     // NiSO4·6H2O 청록
+  coSulfate: 0xc2255c,     // CoSO4·7H2O 적색
+  safety: 0xfcc419,
+  beacon: 0x40c057,
+};
+const CAMERA_PRESETS = {
+  top:      { pos: [0, 30, 0.01], target: [0, 0, 0] },
+  front:    { pos: [0, 3.5, 21],  target: [0, 2.2, 0] },
+  diagonal: { pos: [16, 12.5, 18], target: [0.5, 0.8, 1.0] },
+  reactor:  { pos: [5, 5.5, 6],   target: [0, 2.5, 0] },
+  recovery: { pos: [3.8, 4.5, 7.6], target: [8.5, 0.8, 3.8] },
+};
+const REACTOR = { R: 1.6, H: 3.4, Y0: 0.8, jacketR: 1.72 };   // 침출 반응조
+const CONVEYOR = { start: new THREE.Vector3(-7, 1.3, 0), end: new THREE.Vector3(-1.9, 5.0, 0), width: 0.7, speed: 1.5 };
+const HOPPER_POS = new THREE.Vector3(-7, 0, 0);
+const INLET = new THREE.Vector3(-0.9, 4.52, 0);               // 반응조 뚜껑 원료 투입구
+const CRANE = { railY: 5.15, z1: -6.2, z2: 5.4, x1: -12.3, x2: -5.6, hookUp: 3.95 };
+const PRESS = { x: 5.5, plateY: 1.65, plates: 12, fixedX: 3.95, closedFollowerX: 5.2, openFollowerX: 6.75 };
+const HEAP_REF = { kg: 25, h: 0.6 };                          // 회수량 25 kg = 결정 더미 높이 0.6 m
+const DEMO_NOTE = '평균 기준 판정을 가정한 값이다. 확률 제약(하한 기준, μ − 1.28σ ≥ 목표)을 적용하면 Ni 하한이 목표에 못 미친다. '
+  + '예측 평균은 Module 2 모델이 근거 배치를 오차 없이 맞혔다고 가정했다.';
+
+// URL 옵션: cam, seek(초), cut(0/1), labels(0/1), debug(1), autoperf(0), pick(설비 ID)
+const QS = new URLSearchParams(location.search);
+const OPT = {
+  cam: CAMERA_PRESETS[QS.get('cam')] ? QS.get('cam') : 'diagonal',
+  seek: Math.max(0, parseFloat(QS.get('seek') || '0') || 0),
+  cut: QS.get('cut') !== '0',
+  labels: QS.get('labels') !== '0',
+  debug: QS.get('debug') === '1',
+  autoperf: QS.get('autoperf') !== '0',
+  pick: QS.get('pick'),
+};
+
+// =====================================================================
+// 2. 데이터 — Module 3 출력 가정값 (명세 4.3)
+// =====================================================================
+const DEMO_INPUT = {
+  scenario_name: '데모 — A급 원료, 황산 최소 레시피 (BP-2025-0074 근거)',
+  feed: {
+    batch_id: 'BP-2025-0074', grade: 'A',
+    ni_pct: 26.89, co_pct: 13.15, li_pct: 4.82, mn_pct: 11.05,
+    cu_pct: 0.24, fe_pct: 0.52, al_pct: 0.85, feed_kg: 95.5,
+  },
+  evidence: {
+    source: '원본 데이터 실측 (학생배포용 xlsx)',
+    acid_l: 836, temp_c: 86.2, time_hr: 7.47,
+    ni_recovery_pct: 95.91, co_recovery_pct: 90.49,
+  },
+  recipe: {
+    schema_version: '1.0',
+    status: 'ok',
+    batch_id: 'BP-2025-0074',
+    target: { ni_recovery_pct: 95.0, co_recovery_pct: 90.0 },
+    recipe: { acid_l: 840, temp_c: 86, time_hr: 7.5, acid_per_feed: 8.80 },
+    prediction: {
+      ni: { mean: 95.91, low: 92.87, high: 98.95 },
+      co: { mean: 90.49, low: 87.23, high: 93.75 },
+    },
+    shortfall: null,
+    confidence: 'medium',
+    similar_batches: 5,
+    domain_distance: null,
+    message: '목표 달성 가능 (평균 기준 판정 · 데모 가정값).',
+    meta: {
+      algorithm: 'grid', n_evals: 93240, elapsed_ms: null,
+      model_version: 'demo_assumed', config_hash: 'demo',
+      generated_at: '2026-11-17T00:00:00+09:00',
+    },
+  },
+};
+
+const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
+const clamp01 = (x) => Math.min(1, Math.max(0, x));
+const clampTo = (v, [a, b]) => Math.min(b, Math.max(a, v));
+const f1 = (v) => (Math.round(v * 10) / 10).toFixed(1);
+const f2 = (v) => (Math.round(v * 100) / 100).toFixed(2);
+const easeInOut = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
+
+/** 묶음(feed + recipe) / Module 3 JSON 단독을 판별한다. */
+function parseInput(json) {
+  if (!json || typeof json !== 'object') throw new Error('입력이 객체가 아닙니다');
+  if ('schema_version' in json) return { name: 'Module 3 출력', feed: null, evidence: null, recipe: json };
+  return { name: json.scenario_name || '시나리오', feed: json.feed || null, evidence: json.evidence || null, recipe: json.recipe };
+}
+
+/** 명세 9.4 검증 규칙. */
+function validateRecipe(r) {
+  const errors = [], warnings = [];
+  if (!r || typeof r !== 'object') return { errors: ['recipe 객체가 없습니다'], warnings };
+  if (r.schema_version !== '1.0') warnings.push(`알 수 없는 schema_version: ${r.schema_version}`);
+  if (!['ok', 'infeasible', 'out_of_domain'].includes(r.status)) errors.push(`status 값 오류: ${r.status}`);
+  if (r.status === 'ok' && (!r.recipe || !r.prediction)) errors.push('status=ok 인데 recipe 또는 prediction 이 없습니다');
+  if (r.recipe) {
+    for (const k of Object.keys(BOUNDS)) {
+      const v = r.recipe[k];
+      if (!isNum(v)) errors.push(`recipe.${k} 가 숫자가 아닙니다`);
+      else if (v < BOUNDS[k][0] || v > BOUNDS[k][1]) warnings.push(`recipe.${k}=${v} 범위 밖 — 애니메이션 입력만 자름`);
+    }
+  }
+  if (r.prediction) {
+    for (const m of ['ni', 'co']) for (const s of ['mean', 'low', 'high']) {
+      if (!isNum(r.prediction?.[m]?.[s])) errors.push(`prediction.${m}.${s} 가 숫자가 아닙니다`);
+    }
+  }
+  return { errors, warnings };
+}
+
+/** 화면이 읽는 유일한 객체 (명세 9.3). Module 3 키는 여기서만 읽는다. */
+function toViewModel(sc, warnings = []) {
+  const r = sc.recipe, f = sc.feed;
+  const g = f && String(f.grade ?? '').trim().toUpperCase().replace('급', '');
+  const grade = ['A', 'B', 'C'].includes(g) ? g : null;
+  const impurityTotal = f && [f.cu_pct, f.fe_pct, f.al_pct].every(isNum) ? f.cu_pct + f.fe_pct + f.al_pct : null;
+  let recoveredKg = null;
+  if (f && r.prediction && isNum(f.feed_kg)) {
+    const ni = f.feed_kg * f.ni_pct / 100 * r.prediction.ni.mean / 100;
+    const co = f.feed_kg * f.co_pct / 100 * r.prediction.co.mean / 100;
+    recoveredKg = { ni, co, niSulfate: ni * MOLAR.NiSO4_6H2O / MOLAR.Ni, coSulfate: co * MOLAR.CoSO4_7H2O / MOLAR.Co };
+  }
+  const version = String(r.meta?.model_version ?? '');
+  return {
+    status: r.status,
+    batchId: r.batch_id ?? f?.batch_id ?? null,
+    grade, feed: f, impurityTotal,
+    target: { ni: r.target?.ni_recovery_pct ?? 95, co: r.target?.co_recovery_pct ?? 90 },
+    recipe: r.recipe, prediction: r.prediction, recoveredKg,
+    evidence: sc.evidence,
+    confidence: r.status === 'ok' ? (r.confidence ?? null) : null,
+    similarBatches: r.similar_batches ?? null,
+    message: r.message ?? '',
+    isDevModel: /^(mock|proxy|demo)/.test(version),
+    modelVersion: version,
+    warnings, scenarioName: sc.name,
+  };
+}
+
+/** 명세 8.2 매핑 식. override 는 ?debug=1 슬라이더용. */
+function mapRecipe(vm, override = null) {
+  const src = override || vm.recipe;
+  if (!src) return null;
+  const acid = clampTo(src.acid_l, BOUNDS.acid_l);
+  const temp = clampTo(src.temp_c, BOUNDS.temp_c);
+  const time = clampTo(src.time_hr, BOUNDS.time_hr);
+  const nT = clamp01((temp - 40) / 55), nA = clamp01((acid - 400) / 1100);
+  const heap = (kg) => HEAP_REF.h * kg / HEAP_REF.kg;
+  return {
+    acid, temp, time, nT, nA, grade: vm.grade,
+    liquidH: 1.2 + 1.8 * nA,
+    rps: 0.6 + 0.8 * nT,
+    heatSec: time * 0.2 * SEC_PER_HR,
+    leachSec: time * 0.8 * SEC_PER_HR,
+    niHeapH: vm.recoveredKg ? heap(vm.recoveredKg.ni) : 0.3,
+    coHeapH: vm.recoveredKg ? heap(vm.recoveredKg.co) : 0.15,
+  };
+}
+/** 게이지: 40 ℃ = −120°, 100 ℃ = +120° (위쪽 0°, 시계 방향 +) */
+const gaugeDeg = (t) => -120 + (clampTo(t, [40, 100]) - 40) / 60 * 240;
+
+// 결정적 난수 (화면이 매번 같게)
+function makeRng(seed) {
+  let a = seed >>> 0;
+  return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+const rng = makeRng(20261117);
+
+// =====================================================================
+// 3. 장면 — 렌더러 · 재질 · 도우미
+// =====================================================================
+const viewport = document.getElementById('viewport');
+
+function showFatal(msg) {
+  const f = document.getElementById('fatal');
+  f.hidden = false; f.textContent = msg;
+}
+
+function createRenderer(container) {
+  let renderer;
+  try {
+    renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+  } catch (e) {
+    showFatal('이 브라우저에서 WebGL을 사용할 수 없습니다 — Chrome 또는 Edge 최신 버전을 사용하세요.');
+    throw e;
+  }
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.0;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  container.appendChild(renderer.domElement);
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x14181d);
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
+
+  const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 200);
+  const labelRenderer = new CSS2DRenderer();
+  labelRenderer.domElement.style.position = 'absolute';
+  labelRenderer.domElement.style.top = '0';
+  labelRenderer.domElement.style.left = '0';
+  labelRenderer.domElement.style.pointerEvents = 'none';
+  container.appendChild(labelRenderer.domElement);
+
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+  controls.minDistance = 3;
+  controls.maxDistance = 45;
+  controls.maxPolarAngle = Math.PI * 0.49;
+
+  const composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(scene, camera));
+  const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.3, 0.4, 0.93);
+  composer.addPass(bloom);
+  composer.addPass(new OutputPass());
+
+  // 조명 (명세 7.5)
+  scene.add(new THREE.HemisphereLight(0xdfe8f0, 0x2a2622, 0.45));
+  const sun = new THREE.DirectionalLight(0xfff4e6, 1.5);
+  sun.position.set(9, 16, 7);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  Object.assign(sun.shadow.camera, { left: -16, right: 16, top: 12, bottom: -12, near: 1, far: 45 });
+  sun.shadow.bias = -0.0004;
+  sun.shadow.normalBias = 0.02;
+  scene.add(sun);
+  RectAreaLightUniformsLib.init();
+  // 천장 면광원: 크레인 이동 구간(x < −5.6)을 피해 배치, 아래를 향함
+  for (const x of [-3, 6.5]) {
+    const ra = new THREE.RectAreaLight(0xfff3dc, 2.6, 1.4, 9);
+    ra.position.set(x, 5.65, 0);
+    ra.rotation.x = -Math.PI / 2;
+    scene.add(ra);
+  }
+  return { renderer, scene, camera, labelRenderer, controls, composer, bloom, sun };
+}
+
+const M = {
+  floor: new THREE.MeshStandardMaterial({ color: 0x4f5d56, roughness: 0.72, metalness: 0.05 }),
+  wall: new THREE.MeshStandardMaterial({ color: 0x7d8790, roughness: 0.85, metalness: 0.15 }),
+  wallGlass: new THREE.MeshStandardMaterial({ color: 0x9fb3c8, roughness: 0.3, metalness: 0.1, transparent: true, opacity: 0.1, depthWrite: false, side: THREE.DoubleSide }),
+  steel: new THREE.MeshStandardMaterial({ color: 0xc9ced6, roughness: 0.32, metalness: 0.9 }),
+  darkSteel: new THREE.MeshStandardMaterial({ color: 0x4a5058, roughness: 0.5, metalness: 0.8 }),
+  beam: new THREE.MeshStandardMaterial({ color: 0x3d4a5c, roughness: 0.6, metalness: 0.6 }),
+  vessel: new THREE.MeshStandardMaterial({ color: 0xd3d8de, roughness: 0.38, metalness: 0.6, side: THREE.DoubleSide }),
+  jacket: new THREE.MeshStandardMaterial({ color: 0xaab2bc, roughness: 0.35, metalness: 0.75, side: THREE.DoubleSide, emissive: 0xff6a00, emissiveIntensity: 0 }),
+  section: new THREE.MeshStandardMaterial({ color: 0xe8590c, roughness: 0.6, side: THREE.DoubleSide }),
+  safety: new THREE.MeshStandardMaterial({ color: COLORS.safety, roughness: 0.5, metalness: 0.2 }),
+  hdpe: new THREE.MeshStandardMaterial({ color: 0xe6e1d2, roughness: 0.6 }),
+  hdpeBlue: new THREE.MeshStandardMaterial({ color: 0x7fa6c9, roughness: 0.55 }),
+  frp: new THREE.MeshStandardMaterial({ color: 0x8fa69a, roughness: 0.55, metalness: 0.05 }),
+  concrete: new THREE.MeshStandardMaterial({ color: 0x8f8f89, roughness: 0.9 }),
+  rubber: new THREE.MeshStandardMaterial({ color: 0x1f2226, roughness: 0.9 }),
+  powder: new THREE.MeshStandardMaterial({ color: COLORS.powder, roughness: 0.95 }),
+  plate: new THREE.MeshStandardMaterial({ color: 0x35506b, roughness: 0.6, metalness: 0.1 }),
+  cake: new THREE.MeshStandardMaterial({ color: 0x3a3631, roughness: 0.95 }),
+  motor: new THREE.MeshStandardMaterial({ color: 0x2f6f9f, roughness: 0.45, metalness: 0.5 }),
+  wood: new THREE.MeshStandardMaterial({ color: 0x9c7b52, roughness: 0.85 }),
+  bagLoop: new THREE.MeshStandardMaterial({ color: 0xd9d4c5, roughness: 0.9 }),
+  acrylic: new THREE.MeshStandardMaterial({ color: 0xcfe3ef, roughness: 0.1, metalness: 0, transparent: true, opacity: 0.28, depthWrite: false, side: THREE.DoubleSide }),
+  glass: new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.05, metalness: 0, transmission: 0.9, thickness: 0.05, transparent: true }),
+  lightPanel: new THREE.MeshBasicMaterial({ color: 0xfff3dc }),
+  screen: null, // controlPanel 에서 생성
+  liquid: new THREE.MeshStandardMaterial({ color: COLORS.acid, roughness: 0.18, metalness: 0.05, transparent: true, opacity: 0.94 }),
+  beacon: new THREE.MeshStandardMaterial({ color: 0x1b3a22, emissive: COLORS.beacon, emissiveIntensity: 2.2 }),
+  bubble: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.1, transparent: true, opacity: 0.55 }),
+  niCrystal: new THREE.MeshStandardMaterial({ color: COLORS.niSulfate, roughness: 0.25, metalness: 0.05 }),
+  coCrystal: new THREE.MeshStandardMaterial({ color: COLORS.coSulfate, roughness: 0.25, metalness: 0.05 }),
+};
+
+function mesh(geo, mat, { cast = false, receive = true } = {}) {
+  const m = new THREE.Mesh(geo, mat);
+  m.castShadow = cast; m.receiveShadow = receive;
+  return m;
+}
+function place(parent, obj, x = 0, y = 0, z = 0) { obj.position.set(x, y, z); parent.add(obj); return obj; }
+const boxGeo = (w, h, d) => new THREE.BoxGeometry(w, h, d);
+const cylGeo = (rt, rb, h, seg = 32, open = false, ts = 0, tl = Math.PI * 2) => new THREE.CylinderGeometry(rt, rb, h, seg, 1, open, ts, tl);
+
+function canvasTexture(w, h, draw) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const g = c.getContext('2d'); draw(g, w, h);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+  return { tex: t, ctx: g, canvas: c };
+}
+
+function makeLabel(html, cls = '') {
+  const el = document.createElement('div');
+  el.className = 'lbl ' + cls;
+  el.innerHTML = html;
+  const o = new CSS2DObject(el);
+  o.userData.el = el;
+  return o;
+}
+
+/** 모서리를 둥글린 배관 경로 */
+function roundedPath(pts, radius = 0.25) {
+  const path = new THREE.CurvePath();
+  let prev = pts[0].clone();
+  for (let i = 1; i < pts.length - 1; i++) {
+    const a = pts[i - 1], b = pts[i], c = pts[i + 1];
+    const d1 = b.clone().sub(a); const l1 = d1.length(); d1.normalize();
+    const d2 = c.clone().sub(b); const l2 = d2.length(); d2.normalize();
+    const r = Math.min(radius, l1 / 2, l2 / 2);
+    const p1 = b.clone().addScaledVector(d1, -r), p2 = b.clone().addScaledVector(d2, r);
+    if (prev.distanceTo(p1) > 1e-4) path.add(new THREE.LineCurve3(prev, p1));
+    path.add(new THREE.QuadraticBezierCurve3(p1, b.clone(), p2));
+    prev = p2;
+  }
+  path.add(new THREE.LineCurve3(prev, pts[pts.length - 1].clone()));
+  return path;
+}
+
+const flowBaseTex = canvasTexture(64, 8, (g, w, h) => {
+  g.clearRect(0, 0, w, h);
+  const grd = g.createLinearGradient(0, 0, w, 0);
+  grd.addColorStop(0, 'rgba(255,255,255,0)');
+  grd.addColorStop(0.6, 'rgba(255,255,255,0.9)');
+  grd.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grd; g.fillRect(0, 0, w, h);
+}).tex;
+flowBaseTex.wrapS = THREE.RepeatWrapping;
+
+/** 배관 + 흐름 표시 오버레이. 반환값의 flow.set(on) 으로 흐름을 켠다. */
+function makePipe(parent, pts, r, mat, flowColor = null) {
+  const path = roundedPath(pts.map((p) => new THREE.Vector3(...p)));
+  const len = path.getLength();
+  const seg = Math.max(24, Math.round(len * 14));
+  const pipe = mesh(new THREE.TubeGeometry(path, seg, r, 12, false), mat, { cast: true });
+  parent.add(pipe);
+  let flow = null;
+  if (flowColor !== null) {
+    const tex = flowBaseTex.clone(); tex.needsUpdate = true;
+    tex.wrapS = THREE.RepeatWrapping; tex.repeat.set(len * 1.6, 1);
+    const fm = new THREE.MeshBasicMaterial({ color: flowColor, map: tex, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending });
+    const fmesh = new THREE.Mesh(new THREE.TubeGeometry(path, seg, r * 1.35, 12, false), fm);
+    parent.add(fmesh);
+    flow = { mat: fm, tex, on: false, level: 0 };
+    FLOWS.push(flow);
+  }
+  return { pipe, flow, len };
+}
+const FLOWS = [];
+function updateFlows(dt) {
+  for (const f of FLOWS) {
+    f.level += ((f.on ? 1 : 0) - f.level) * Math.min(1, dt * 4);
+    f.mat.opacity = 0.85 * f.level;
+    f.tex.offset.x -= dt * 1.2 * 1.6;
+  }
+}
+
+// 설비 등록 (클릭 판정 · 정보 패널)
+const EQUIP = new Map();
+function registerEquip(group, id) { group.userData.equip = id; EQUIP.set(id, group); }
+
+// =====================================================================
+// 4. 장면 구성 — 공장 외피
+// =====================================================================
+function makeHBeam(len, size) {
+  const g = new THREE.Group();
+  const fl = boxGeo(size, 0.035, len), web = boxGeo(0.025, size, len);
+  place(g, mesh(fl, M.beam), 0, size / 2, 0);
+  place(g, mesh(fl, M.beam), 0, -size / 2, 0);
+  place(g, mesh(web, M.beam), 0, 0, 0);
+  return g;
+}
+
+function buildShell(scene) {
+  const g = new THREE.Group(); g.name = 'shell'; scene.add(g);
+  const ceiling = new THREE.Group(); ceiling.name = 'ceiling'; g.add(ceiling);
+  const { w, d, h } = FACTORY;
+
+  const floor = mesh(new THREE.PlaneGeometry(w, d), M.floor);
+  floor.rotation.x = -Math.PI / 2; floor.name = 'floor'; g.add(floor);
+
+  // 1 m 격자 (T1 검증용) + 5 m 주격자
+  const minor = [], major = [];
+  for (let x = -w / 2; x <= w / 2 + 1e-6; x += 1) (Math.abs((x + w / 2) % 5) < 1e-6 ? major : minor).push(x, 0.004, -d / 2, x, 0.004, d / 2);
+  for (let z = -d / 2; z <= d / 2 + 1e-6; z += 1) minor.push(-w / 2, 0.004, z, w / 2, 0.004, z);
+  const lines = (arr, op) => {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3));
+    return new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: op }));
+  };
+  g.add(lines(minor, 0.06)); g.add(lines(major, 0.12));
+
+  // 노란 보행 통로선
+  const stripMat = new THREE.MeshBasicMaterial({ color: 0xd9ad00 });
+  const strip = (x1, z1, x2, z2) => {
+    const len = Math.hypot(x2 - x1, z2 - z1);
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(len, 0.1), stripMat);
+    m.rotation.x = -Math.PI / 2; m.rotation.z = -Math.atan2(z2 - z1, x2 - x1);
+    m.position.set((x1 + x2) / 2, 0.006, (z1 + z2) / 2); g.add(m);
+  };
+  strip(-8.4, 4.7, 8.6, 4.7); strip(-8.4, 5.9, 8.6, 5.9);
+  strip(-8.4, -7.6, -8.4, 4.7); strip(-8.4 + 1.2, -3.6, -8.4 + 1.2, 4.7);
+
+  // 반응조 · 탱크 둘레 안전 구역 (줄무늬)
+  const hazard = canvasTexture(64, 64, (c, W, H) => {
+    c.fillStyle = '#1b1b1b'; c.fillRect(0, 0, W, H);
+    c.fillStyle = '#e6b800';
+    for (let i = -W; i < W * 2; i += 32) { c.beginPath(); c.moveTo(i, 0); c.lineTo(i + 16, 0); c.lineTo(i + 16 - H, H); c.lineTo(i - H, H); c.fill(); }
+  }).tex;
+  hazard.wrapS = hazard.wrapT = THREE.RepeatWrapping; hazard.repeat.set(10, 10);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(2.8, 3.0, 72), new THREE.MeshStandardMaterial({ map: hazard, roughness: 0.8 }));
+  ring.rotation.x = -Math.PI / 2; ring.position.y = 0.007; g.add(ring);
+
+  // 벽: 뒤 · 왼쪽 불투명(리브 패널), 앞 · 오른쪽 반투명
+  const t = 0.2;
+  place(g, mesh(boxGeo(w + 2 * t, h, t), M.wall), 0, h / 2, -d / 2 - t / 2);
+  place(g, mesh(boxGeo(t, h, d), M.wall), -w / 2 - t / 2, h / 2, 0);
+  const rib = boxGeo(0.14, h, 0.14);
+  for (let x = -w / 2 + 2.5; x < w / 2 - 0.1; x += 2.5) place(g, mesh(rib, M.beam), x, h / 2, -d / 2 + 0.07);
+  for (let z = -d / 2 + 2.5; z < d / 2 - 0.1; z += 2.5) place(g, mesh(rib, M.beam), -w / 2 + 0.07, h / 2, z);
+  place(g, new THREE.Mesh(boxGeo(w + 2 * t, h, t), M.wallGlass), 0, h / 2, d / 2 + t / 2);
+  place(g, new THREE.Mesh(boxGeo(t, h, d), M.wallGlass), w / 2 + t / 2, h / 2, 0);
+  const edges = new THREE.LineSegments(new THREE.EdgesGeometry(boxGeo(w, h, d)), new THREE.LineBasicMaterial({ color: 0x8aa0b4, transparent: true, opacity: 0.45 }));
+  place(g, edges, 0, h / 2, 0);
+  // 반투명 벽 기둥
+  for (let x = -w / 2; x <= w / 2 + 1e-6; x += 5) place(g, mesh(boxGeo(0.2, h, 0.2), M.beam), x, h / 2, d / 2);
+  for (let z = -d / 2; z <= d / 2 + 1e-6; z += 4.25) place(g, mesh(boxGeo(0.2, h, 0.2), M.beam), w / 2, h / 2, z);
+
+  // 천장: H형 보 5개 (보 상단 = 6 m) + 조명 패널 + 배관 랙
+  for (const x of [-10, -5, 0, 5, 10]) place(ceiling, makeHBeam(d, 0.3), x, h - 0.15, 0);
+  place(ceiling, makeHBeam(w, 0.24).rotateY(Math.PI / 2), 0, h - 0.42, -7.6);
+  const panelGeo = new THREE.PlaneGeometry(1.8, 0.45);
+  for (const x of [-7.5, 7.5]) for (const z of [-5, 0, 5]) {
+    const p = new THREE.Mesh(panelGeo, M.lightPanel); p.rotation.x = Math.PI / 2; place(ceiling, p, x, h - 0.32, z);
+  }
+  return { group: g, ceiling };
+}
+
+// =====================================================================
+// 5. 구역 1 — 원료 반입 · 저장
+// =====================================================================
+const bagGeo = new RoundedBoxGeometry(0.95, 0.9, 0.95, 3, 0.1);
+const bagMatCache = {}, letterMatCache = {};
+function bagMat(color) { return bagMatCache[color] ??= new THREE.MeshStandardMaterial({ color, roughness: 0.88 }); }
+function letterMat(letter, color) {
+  return letterMatCache[letter] ??= new THREE.MeshStandardMaterial({
+    roughness: 0.8,
+    map: canvasTexture(128, 128, (c, W, H) => {
+      c.fillStyle = '#f1f3f5'; c.fillRect(0, 0, W, H);
+      c.strokeStyle = '#' + color.toString(16).padStart(6, '0'); c.lineWidth = 10; c.strokeRect(5, 5, W - 10, H - 10);
+      c.fillStyle = '#212529'; c.font = 'bold 84px sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+      c.fillText(letter, W / 2, H / 2 + 4);
+    }).tex,
+  });
+}
+function makeTonbag(grade) {
+  const color = COLORS.grade[grade] ?? COLORS.grade.none;
+  const g = new THREE.Group();
+  const body = mesh(bagGeo, bagMat(color), { cast: true }); body.position.y = 0.45; g.add(body);
+  place(g, mesh(cylGeo(0.36, 0.38, 0.06, 20), M.powder), 0, 0.92, 0);
+  for (const [sx, sz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+    const loop = mesh(new THREE.TorusGeometry(0.07, 0.016, 6, 12, Math.PI), M.bagLoop);
+    loop.position.set(sx * 0.37, 0.9, sz * 0.37); loop.rotation.y = sx * sz > 0 ? -Math.PI / 4 : Math.PI / 4; g.add(loop);
+  }
+  const decal = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.4), letterMat(grade ?? '?', color));
+  place(g, decal, 0, 0.48, 0.479);
+  return g;
+}
+const PILE_SLOTS = [[-0.52, -0.52], [0.52, -0.52], [-0.52, 0.52], [0.52, 0.52]];
+function slotPosition(grade, index) {
+  const [px, pz] = PILE_POS[grade];
+  const [sx, sz] = PILE_SLOTS[index % 4];
+  return new THREE.Vector3(px + sx, Math.floor(index / 4) * 0.92, pz + sz);
+}
+
+function buildRawMaterialZone(scene, vm) {
+  const piles = {}, labels = {};
+  for (const G of ['A', 'B', 'C']) {
+    const pile = new THREE.Group(); pile.name = 'orePile' + G;
+    for (let i = 0; i < PILE_COUNT[G]; i++) {
+      const bag = makeTonbag(G);
+      bag.position.copy(slotPosition(G, i)).sub(new THREE.Vector3(PILE_POS[G][0], 0, PILE_POS[G][1]));
+      bag.rotation.y = (rng() - 0.5) * 0.12;
+      pile.add(bag);
+    }
+    pile.position.set(PILE_POS[G][0], 0, PILE_POS[G][1]);
+    const share = (GRADE_COUNT[G] / GRADE_TOTAL * 100).toFixed(1);
+    const lbl = makeLabel(`<b>${G}급 원료</b> · ${share}%<br><span class="sub">블랙파우더 톤백</span>`, `grade-${G}` + (vm.grade === G ? ' current' : ''));
+    lbl.position.set(0, 2.3, 0); pile.add(lbl);
+    scene.add(pile); registerEquip(pile, 'orePile' + G);
+    piles[G] = pile; labels[G] = lbl;
+  }
+
+  // 폐배터리 팩 팔레트 (블랙파우더의 출처, 장식)
+  const pallet = new THREE.Group(); pallet.name = 'batteryPallet';
+  place(pallet, mesh(boxGeo(1.6, 0.14, 1.2), M.wood, { cast: true }), 0, 0.07, 0);
+  const modGeo = boxGeo(0.62, 0.2, 0.34), modMat = new THREE.MeshStandardMaterial({ color: 0x3a4250, roughness: 0.5, metalness: 0.4 });
+  const termMat = new THREE.MeshStandardMaterial({ color: 0xe8590c, roughness: 0.4 });
+  for (let layer = 0; layer < 2; layer++) for (let i = 0; i < 2; i++) for (let j = 0; j < 3; j++) {
+    const m = place(pallet, mesh(modGeo, modMat, { cast: true }), -0.36 + i * 0.72, 0.24 + layer * 0.21, -0.38 + j * 0.38);
+    place(pallet, mesh(boxGeo(0.06, 0.03, 0.06), termMat), m.position.x + 0.22, m.position.y + 0.11, m.position.z);
+  }
+  const plbl = makeLabel('<b>폐배터리 팩</b><br><span class="sub">전처리(방전 · 파쇄) 전</span>');
+  plbl.position.set(0, 1.1, 0); pallet.add(plbl);
+  pallet.position.set(-10.5, 0, 6.5); scene.add(pallet); registerEquip(pallet, 'batteryPallet');
+
+  // 제어반 (SCADA 화면)
+  const panel = new THREE.Group(); panel.name = 'controlPanel';
+  place(panel, mesh(boxGeo(1.6, 2.0, 0.5), new THREE.MeshStandardMaterial({ color: 0xc5ccd3, roughness: 0.5, metalness: 0.3 }), { cast: true }), 0, 1.0, 0);
+  const screen = canvasTexture(512, 256, () => {});
+  M.screen = new THREE.MeshBasicMaterial({ map: screen.tex });
+  place(panel, new THREE.Mesh(new THREE.PlaneGeometry(1.3, 0.65), M.screen), 0, 1.45, 0.252);
+  for (let i = 0; i < 4; i++) {
+    const lamp = mesh(cylGeo(0.035, 0.035, 0.03, 12), new THREE.MeshStandardMaterial({ color: 0x222, emissive: [0x40c057, 0x40c057, 0xfcc419, 0x4dabf7][i], emissiveIntensity: 1.4 }));
+    lamp.rotation.x = Math.PI / 2; place(panel, lamp, -0.45 + i * 0.3, 0.9, 0.26);
+  }
+  const clbl = makeLabel('<b>제어반</b>'); clbl.position.set(0, 2.35, 0); panel.add(clbl);
+  panel.position.set(-9, 0, -7.6); scene.add(panel); registerEquip(panel, 'controlPanel');
+
+  return { piles, labels, screen };
+}
+
+function drawScada(screen, st) {
+  const c = screen.ctx, W = screen.canvas.width, H = screen.canvas.height;
+  c.fillStyle = '#071018'; c.fillRect(0, 0, W, H);
+  c.fillStyle = '#4dabf7'; c.font = 'bold 26px sans-serif'; c.fillText('LEACHING LINE 1', 18, 38);
+  c.fillStyle = '#69db7c'; c.font = '22px monospace';
+  const lines = [
+    `STATE  ${st.state}`,
+    `TEMP   ${st.temp.toFixed(1)} / ${st.target} C`,
+    `TIME   ${st.hr.toFixed(1)} / ${st.time} h`,
+    `AGIT   ${st.rps.toFixed(2)} rps`,
+    `LEVEL  ${Math.round(st.level * 100)} %`,
+  ];
+  lines.forEach((l, i) => c.fillText(l, 18, 80 + i * 34));
+  c.strokeStyle = '#1f3a4d'; c.strokeRect(6, 6, W - 12, H - 12);
+  screen.tex.needsUpdate = true;
+}
+
+// =====================================================================
+// 6. 구역 2 — 투입 · 침출 (수치 연동)
+// =====================================================================
+function buildCrane(scene) {
+  const { railY, z1, z2, x1, x2 } = CRANE;
+  const g = new THREE.Group(); g.name = 'crane';
+  for (const z of [z1, z2]) {
+    place(g, mesh(boxGeo(x2 - x1, 0.2, 0.18), M.beam, { cast: true }), (x1 + x2) / 2, railY, z);
+    place(g, mesh(cylGeo(0.09, 0.09, railY, 12), M.beam), x2, railY / 2, z);
+  }
+  const bridge = new THREE.Group();
+  place(bridge, mesh(boxGeo(0.34, 0.34, z2 - z1 + 0.4), M.safety, { cast: true }), 0, railY + 0.27, (z1 + z2) / 2);
+  for (const z of [z1, z2]) place(bridge, mesh(boxGeo(0.6, 0.2, 0.3), M.safety), 0, railY + 0.15, z);
+  const trolley = new THREE.Group();
+  place(trolley, mesh(boxGeo(0.62, 0.26, 0.5), M.safety, { cast: true }), 0, railY + 0.02, 0);
+  place(trolley, mesh(cylGeo(0.12, 0.12, 0.4, 16), M.darkSteel).rotateZ(Math.PI / 2), 0, railY - 0.16, 0);
+  const cable = mesh(cylGeo(0.012, 0.012, 1, 6), M.darkSteel); trolley.add(cable);
+  const hook = new THREE.Group();
+  place(hook, mesh(boxGeo(0.22, 0.18, 0.16), M.safety), 0, 0.09, 0);
+  place(hook, mesh(new THREE.TorusGeometry(0.06, 0.015, 6, 12, Math.PI * 1.5), M.darkSteel), 0, -0.04, 0);
+  trolley.add(hook);
+  bridge.add(trolley);
+  g.add(bridge);
+  scene.add(g); registerEquip(g, 'crane');
+  const lbl = makeLabel('<b>천장 크레인</b><br><span class="sub">톤백 운반</span>'); lbl.position.set(-12, railY + 0.4, z1 + 0.6); g.add(lbl);
+  return { group: g, bridge, trolley, cable, hook, carried: null };
+}
+function setCrane(crane, x, z, hookY) {
+  crane.bridge.position.x = x;
+  crane.trolley.position.z = z;
+  const top = CRANE.railY - 0.3;
+  const len = Math.max(0.05, top - (hookY + 0.18));
+  crane.cable.scale.y = len;
+  crane.cable.position.set(0, hookY + 0.18 + len / 2, 0);
+  crane.hook.position.set(0, hookY, 0);
+}
+
+function buildConveyor(scene) {
+  const { start: S, end: E, width } = CONVEYOR;
+  const dir = E.clone().sub(S); const len = dir.length(); dir.normalize();
+  const angle = Math.atan2(dir.y, dir.x);
+  const g = new THREE.Group(); g.name = 'conveyor';
+  const belt = new THREE.Group(); belt.position.copy(S); belt.rotation.z = angle; g.add(belt);
+
+  const beltTex = canvasTexture(128, 32, (c, W, H) => {
+    c.fillStyle = '#1e2124'; c.fillRect(0, 0, W, H);
+    c.strokeStyle = '#3a3f45'; c.lineWidth = 4;
+    for (let x = 8; x < W; x += 32) { c.beginPath(); c.moveTo(x, 4); c.lineTo(x + 10, H / 2); c.lineTo(x, H - 4); c.stroke(); }
+  }).tex;
+  beltTex.wrapS = THREE.RepeatWrapping; beltTex.repeat.set(len / 0.5, 1);
+  const beltMat = new THREE.MeshStandardMaterial({ map: beltTex, roughness: 0.9 });
+  place(belt, mesh(boxGeo(len, 0.06, width), beltMat, { cast: true }), len / 2, 0, 0);
+  for (const z of [-1, 1]) place(belt, mesh(boxGeo(len, 0.16, 0.05), M.darkSteel, { cast: true }), len / 2, 0.02, z * (width / 2 + 0.04));
+  const rollers = [];
+  const rollerGeo = cylGeo(0.06, 0.06, width + 0.04, 14);
+  for (let s = 0.2; s < len; s += 0.45) {
+    const r = mesh(rollerGeo, M.steel); r.rotation.x = Math.PI / 2; place(belt, r, s, -0.07, 0); rollers.push(r);
+  }
+  // 지지 다리 (월드 수직)
+  for (const frac of [0.08, 0.45, 0.82]) {
+    const p = S.clone().addScaledVector(dir, len * frac);
+    for (const z of [-0.32, 0.32]) {
+      const legH = p.y - 0.1;
+      place(g, mesh(boxGeo(0.08, legH, 0.08), M.beam, { cast: true }), p.x, legH / 2, z);
+    }
+    place(g, mesh(boxGeo(0.08, 0.08, 0.72), M.beam), p.x, p.y - 0.1, 0);
+  }
+  // 반응조 투입 슈트
+  const chuteDir = INLET.clone().sub(E); const chuteLen = chuteDir.length();
+  const chute = mesh(boxGeo(chuteLen, 0.04, 0.45), M.steel, { cast: true });
+  chute.position.copy(E).add(INLET).multiplyScalar(0.5);
+  chute.rotation.z = Math.atan2(chuteDir.y, chuteDir.x); g.add(chute);
+
+  // 투입 호퍼
+  const hopper = new THREE.Group(); hopper.name = 'hopper';
+  place(hopper, mesh(cylGeo(0.8, 0.25, 1.0, 28, true), M.vessel, { cast: true }), 0, 1.95, 0);
+  place(hopper, mesh(new THREE.TorusGeometry(0.8, 0.03, 8, 40), M.darkSteel).rotateX(Math.PI / 2), 0, 2.45, 0);
+  for (const [sx, sz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) place(hopper, mesh(boxGeo(0.07, 2.45, 0.07), M.beam), sx * 0.62, 1.225, sz * 0.62);
+  hopper.position.copy(HOPPER_POS);
+  const hl = makeLabel('<b>투입 호퍼</b> · 컨베이어'); hl.position.set(0, 3.0, 0); hopper.add(hl);
+  scene.add(hopper); registerEquip(hopper, 'hopper');
+
+  scene.add(g); registerEquip(g, 'conveyor');
+  return { group: g, beltTex, rollers, dir, len, normal: new THREE.Vector3(-dir.y, dir.x, 0) };
+}
+
+function buildReactor(scene) {
+  const { R, H, Y0, jacketR } = REACTOR;
+  const g = new THREE.Group(); g.name = 'reactor';
+  const closed = new THREE.Group(), cut = new THREE.Group();
+  g.add(closed, cut);
+  const CUT_S = Math.PI / 4, CUT_L = Math.PI * 1.5;   // 앞쪽(+Z) 90° 제거
+
+  // 몸체 · 재킷 (닫힘 / 단면)
+  place(closed, mesh(cylGeo(R, R, H, 72, true), M.vessel, { cast: true }), 0, Y0 + H / 2, 0);
+  place(cut, mesh(cylGeo(R, R, H, 72, true, CUT_S, CUT_L), M.vessel, { cast: true }), 0, Y0 + H / 2, 0);
+  const jH = 2.2, jY = Y0 + 0.1 + jH / 2;
+  const jacketClosed = mesh(cylGeo(jacketR, jacketR, jH, 72, true), M.jacket, { cast: true });
+  const jacketCut = mesh(cylGeo(jacketR, jacketR, jH, 72, true, CUT_S, CUT_L), M.jacket, { cast: true });
+  place(closed, jacketClosed, 0, jY, 0); place(cut, jacketCut, 0, jY, 0);
+  for (const y of [jY - jH / 2, jY + jH / 2]) {
+    place(closed, mesh(new THREE.TorusGeometry(jacketR, 0.035, 8, 72), M.steel).rotateX(Math.PI / 2), 0, y, 0);
+  }
+  // 단면 표시면
+  for (const th of [CUT_S, CUT_S + CUT_L]) {
+    const sec = new THREE.Mesh(new THREE.PlaneGeometry(0.2, H), M.section);
+    sec.position.set(1.66 * Math.sin(th), Y0 + H / 2, 1.66 * Math.cos(th));
+    sec.rotation.y = th - Math.PI / 2; cut.add(sec);
+  }
+  // 투시창 (닫힘 상태 전용)
+  const sg = new THREE.Group();
+  place(sg, mesh(new THREE.TorusGeometry(0.24, 0.04, 8, 24), M.steel), 0, 0, 0);
+  place(sg, new THREE.Mesh(new THREE.CircleGeometry(0.22, 24), M.glass), 0, 0, 0.005);
+  sg.position.set((R + 0.01) * Math.sin(0.25), Y0 + 2.75, (R + 0.01) * Math.cos(0.25)); sg.rotation.y = 0.25;
+  closed.add(sg);
+
+  // 접시형 바닥 · 뚜껑
+  const dish = mesh(new THREE.SphereGeometry(R, 56, 14, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), M.vessel, { cast: true });
+  dish.scale.y = 0.28; place(g, dish, 0, Y0, 0);
+  const lidFull = mesh(new THREE.SphereGeometry(R, 56, 14, 0, Math.PI * 2, 0, Math.PI / 2), M.vessel, { cast: true });
+  lidFull.scale.y = 0.25; place(closed, lidFull, 0, Y0 + H, 0);
+  const lidCut = mesh(new THREE.SphereGeometry(R, 56, 14, Math.PI * 0.75, Math.PI * 1.5, 0, Math.PI / 2), M.vessel, { cast: true });
+  lidCut.scale.y = 0.25; place(cut, lidCut, 0, Y0 + H, 0);
+  place(closed, mesh(new THREE.TorusGeometry(R, 0.05, 8, 72), M.steel).rotateX(Math.PI / 2), 0, Y0 + H, 0);
+  // 뚜껑 노즐
+  place(g, mesh(cylGeo(0.16, 0.16, 0.25, 16), M.steel), INLET.x, INLET.y, INLET.z);
+  // 바닥 배출 노즐
+  place(g, mesh(cylGeo(0.1, 0.1, 0.3, 12), M.steel), 0, Y0 - R * 0.28 - 0.1, 0);
+  // 다리 · 베이스
+  for (let i = 0; i < 4; i++) {
+    const a = Math.PI / 4 + i * Math.PI / 2;
+    place(g, mesh(cylGeo(0.09, 0.09, Y0 + 0.4, 12), M.darkSteel, { cast: true }), 1.35 * Math.sin(a), (Y0 + 0.4) / 2, 1.35 * Math.cos(a));
+    place(g, mesh(boxGeo(0.35, 0.05, 0.35), M.concrete), 1.35 * Math.sin(a), 0.025, 1.35 * Math.cos(a));
+  }
+
+  // 침출액 + 표면 (와류)
+  const liquid = mesh(cylGeo(1.56, 1.56, 1, 56), M.liquid);
+  g.add(liquid);
+  const surfGeo = new THREE.RingGeometry(0.02, 1.56, 64, 7);
+  const surfBase = surfGeo.attributes.position.array.slice();
+  const surface = new THREE.Mesh(surfGeo, M.liquid); surface.rotation.x = -Math.PI / 2; g.add(surface);
+
+  // 교반기: 모터(고정) + 축 · 피치드 블레이드 터빈 2단(회전)
+  const motorY = Y0 + H + 0.4;
+  place(g, mesh(boxGeo(0.5, 0.18, 0.5), M.darkSteel, { cast: true }), 0, motorY + 0.09, 0);
+  place(g, mesh(cylGeo(0.26, 0.26, 0.5, 24), M.motor, { cast: true }), 0, motorY + 0.43, 0);
+  place(g, mesh(cylGeo(0.2, 0.2, 0.12, 24), M.darkSteel), 0, motorY + 0.74, 0);
+  const rotor = new THREE.Group(); g.add(rotor);
+  place(rotor, mesh(cylGeo(0.055, 0.055, motorY - 1.05, 12), M.steel), 0, (motorY + 1.05) / 2, 0);
+  const bladeGeo = boxGeo(0.5, 0.035, 0.17);
+  for (const hy of [Y0 + 0.45, Y0 + 1.55]) {
+    place(rotor, mesh(cylGeo(0.1, 0.1, 0.12, 16), M.steel), 0, hy, 0);
+    for (let k = 0; k < 4; k++) {
+      const holder = new THREE.Group(); holder.rotation.y = k * Math.PI / 2; holder.position.y = hy;
+      const blade = mesh(bladeGeo, M.steel); blade.position.x = 0.33; blade.rotation.x = Math.PI / 4;
+      holder.add(blade); rotor.add(holder);
+    }
+  }
+
+  // 온도 게이지 (θ = 60°, 바깥을 향함)
+  const gauge = new THREE.Group();
+  const dialTex = canvasTexture(256, 256, (c, W, Hh) => {
+    const cx = W / 2, cy = Hh / 2, r = 108;
+    c.fillStyle = '#f8f9fa'; c.beginPath(); c.arc(cx, cy, 124, 0, Math.PI * 2); c.fill();
+    const toRad = (deg) => (deg - 90) * Math.PI / 180;
+    c.lineWidth = 14; c.strokeStyle = '#e03131';
+    c.beginPath(); c.arc(cx, cy, r - 8, toRad(gaugeDeg(95)), toRad(gaugeDeg(100))); c.stroke();
+    c.strokeStyle = '#212529'; c.fillStyle = '#212529'; c.font = 'bold 20px sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    for (let t = 40; t <= 100; t += 5) {
+      const a = toRad(gaugeDeg(t)), major = t % 10 === 0;
+      c.lineWidth = major ? 4 : 2;
+      c.beginPath(); c.moveTo(cx + Math.cos(a) * (r - (major ? 20 : 12)), cy + Math.sin(a) * (r - (major ? 20 : 12)));
+      c.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r); c.stroke();
+      if (major) c.fillText(String(t), cx + Math.cos(a) * (r - 38), cy + Math.sin(a) * (r - 38));
+    }
+    c.font = 'bold 22px sans-serif'; c.fillText('℃', cx, cy + 46);
+    c.font = '13px sans-serif'; c.fillStyle = '#e03131'; c.fillText('95 한계', cx + 62, cy + 84);
+  }).tex;
+  place(gauge, mesh(cylGeo(0.42, 0.42, 0.08, 40), M.darkSteel).rotateX(Math.PI / 2), 0, 0, 0);
+  place(gauge, new THREE.Mesh(new THREE.CircleGeometry(0.38, 40), new THREE.MeshStandardMaterial({ map: dialTex, roughness: 0.4 })), 0, 0, 0.042);
+  const needleGeo = boxGeo(0.022, 0.3, 0.01); needleGeo.translate(0, 0.12, 0);
+  const needle = mesh(needleGeo, new THREE.MeshStandardMaterial({ color: 0xc92a2a, emissive: 0x5c0000, emissiveIntensity: 0.6 }));
+  needle.position.z = 0.055; gauge.add(needle);
+  place(gauge, mesh(cylGeo(0.035, 0.035, 0.03, 12), M.darkSteel).rotateX(Math.PI / 2), 0, 0, 0.06);
+  place(gauge, mesh(boxGeo(0.08, 0.08, 0.2), M.darkSteel), 0, 0, -0.12);
+  const gTh = Math.PI / 3;
+  gauge.position.set(1.9 * Math.sin(gTh), Y0 + 1.8, 1.9 * Math.cos(gTh)); gauge.rotation.y = gTh;
+  g.add(gauge);
+  const gaugeLbl = makeLabel('', 'live key'); gaugeLbl.position.set(0, 0.62, 0); gauge.add(gaugeLbl);
+
+  // 액위계 (θ = 100°)
+  const lTh = Math.PI * 100 / 180;
+  const level = new THREE.Group();
+  place(level, new THREE.Mesh(cylGeo(0.06, 0.06, 3.0, 12), M.acrylic), 0, 1.5, 0);
+  const levelBar = mesh(cylGeo(0.035, 0.035, 1, 10), new THREE.MeshStandardMaterial({ color: COLORS.liquidHigh, emissive: COLORS.liquidHigh, emissiveIntensity: 0.4 }));
+  level.add(levelBar);
+  for (const y of [0, 3.0]) place(level, mesh(boxGeo(0.14, 0.06, 0.14), M.darkSteel), 0, y, 0);
+  level.position.set(1.85 * Math.sin(lTh), Y0 + 0.2, 1.85 * Math.cos(lTh));
+  g.add(level);
+
+  // 운전 플랫폼 (y = 3.2) · 난간 · 계단
+  const deckY = 3.2;
+  const shape = new THREE.Shape(); shape.absarc(0, 0, 2.6, 0, Math.PI * 2, false);
+  const hole = new THREE.Path(); hole.absarc(0, 0, 1.8, 0, Math.PI * 2, true); shape.holes.push(hole);
+  const deck = mesh(new THREE.ExtrudeGeometry(shape, { depth: 0.08, bevelEnabled: false, curveSegments: 48 }), new THREE.MeshStandardMaterial({ color: 0x5b636c, roughness: 0.7, metalness: 0.6 }), { cast: true });
+  deck.rotation.x = -Math.PI / 2; deck.position.y = deckY; g.add(deck);
+  for (const ry of [deckY + 1.1, deckY + 0.55]) place(g, mesh(new THREE.TorusGeometry(2.55, 0.025, 6, 72), M.safety).rotateX(Math.PI / 2), 0, ry, 0);
+  for (let i = 0; i < 16; i++) {
+    const a = i * Math.PI / 8;
+    place(g, mesh(cylGeo(0.022, 0.022, 1.1, 6), M.safety), 2.55 * Math.sin(a), deckY + 0.55, 2.55 * Math.cos(a));
+  }
+  for (let i = 0; i < 6; i++) {
+    const a = i * Math.PI / 3;
+    place(g, mesh(cylGeo(0.07, 0.07, deckY, 10), M.beam, { cast: true }), 2.45 * Math.sin(a), deckY / 2, 2.45 * Math.cos(a));
+  }
+  // 계단 (−Z 쪽, +X 방향으로 내려감)
+  const stairs = new THREE.Group();
+  place(stairs, mesh(boxGeo(0.9, 0.08, 0.9), deck.material), 2.1, deckY + 0.04, -2.0);
+  const steps = 14, rise = deckY / steps, run = 0.16;
+  for (let i = 0; i < steps; i++) place(stairs, mesh(boxGeo(run + 0.02, 0.04, 0.8), deck.material), 2.6 + i * run, deckY - (i + 1) * rise + 0.02, -2.0);
+  const stringerLen = Math.hypot(steps * run, deckY);
+  for (const z of [-2.42, -1.58]) {
+    const s = mesh(boxGeo(stringerLen, 0.18, 0.04), M.beam);
+    s.position.set(2.6 + steps * run / 2, deckY / 2, z); s.rotation.z = -Math.atan2(deckY, steps * run); stairs.add(s);
+    const rail = mesh(cylGeo(0.02, 0.02, stringerLen, 6), M.safety);
+    rail.position.set(2.6 + steps * run / 2, deckY / 2 + 0.95, z); rail.rotation.z = Math.PI / 2 - Math.atan2(deckY, steps * run); stairs.add(rail);
+  }
+  g.add(stairs);
+
+  // 상태 경광등
+  const bA = Math.PI / 4;
+  const bx = 2.55 * Math.sin(bA), bz = 2.55 * Math.cos(bA);
+  place(g, mesh(cylGeo(0.03, 0.03, 0.55, 8), M.darkSteel), bx, deckY + 1.1 + 0.27, bz);
+  const beacon = mesh(new THREE.SphereGeometry(0.13, 20, 14), M.beacon);
+  place(g, beacon, bx, deckY + 1.1 + 0.62, bz);
+
+  // 기포 (InstancedMesh)
+  const bubbles = new THREE.InstancedMesh(new THREE.SphereGeometry(0.035, 8, 6), M.bubble, 40);
+  bubbles.count = 0; bubbles.frustumCulled = false; g.add(bubbles);
+  const bubbleState = Array.from({ length: 40 }, () => ({ x: 0, y: 0, z: 0, v: 0, alive: false }));
+
+  const lbl = makeLabel('', 'live key'); lbl.position.set(0, Y0 + H + 1.55, 0); g.add(lbl);
+
+  scene.add(g); registerEquip(g, 'reactor');
+  return { group: g, closed, cut, liquid, surface, surfGeo, surfBase, rotor, needle, gaugeLbl, levelBar, beacon, bubbles, bubbleState, label: lbl };
+}
+
+function buildTanksAndPipes(scene) {
+  const out = {};
+  const decal = (text, sub, color) => canvasTexture(256, 128, (c, W, H) => {
+    c.fillStyle = '#f8f9fa'; c.fillRect(0, 0, W, H);
+    c.save(); c.translate(56, 64); c.rotate(Math.PI / 4);
+    c.fillStyle = '#fff'; c.strokeStyle = '#e03131'; c.lineWidth = 7; c.fillRect(-30, -30, 60, 60); c.strokeRect(-30, -30, 60, 60); c.restore();
+    c.fillStyle = '#212529'; c.font = 'bold 13px sans-serif'; c.textAlign = 'center'; c.fillText('부식성', 56, 70);
+    c.textAlign = 'left'; c.fillStyle = color; c.font = 'bold 34px sans-serif'; c.fillText(text, 104, 58);
+    c.fillStyle = '#495057'; c.font = '18px sans-serif'; c.fillText(sub, 106, 90);
+  }).tex;
+
+  function tank(id, x, z, r, h, mat, text, sub, color, labelHtml) {
+    const t = new THREE.Group(); t.name = id;
+    place(t, mesh(cylGeo(r + 0.1, r + 0.1, 0.15, 32), M.concrete), 0, 0.075, 0);
+    place(t, mesh(cylGeo(r, r, h, 40), mat, { cast: true }), 0, 0.15 + h / 2, 0);
+    const dome = mesh(new THREE.SphereGeometry(r, 32, 10, 0, Math.PI * 2, 0, Math.PI / 2), mat, { cast: true });
+    dome.scale.y = 0.3; place(t, dome, 0, 0.15 + h, 0);
+    const band = new THREE.Mesh(cylGeo(r + 0.004, r + 0.004, h * 0.32, 40, true, -0.75, 1.5), new THREE.MeshStandardMaterial({ map: decal(text, sub, color), roughness: 0.6 }));
+    place(t, band, 0, 0.15 + h * 0.62, 0);
+    // 방류벽
+    const bw = r * 2 + 0.7, bh = 0.35;
+    for (const [w, d, px, pz] of [[bw, 0.12, 0, bw / 2], [bw, 0.12, 0, -bw / 2], [0.12, bw, bw / 2, 0], [0.12, bw, -bw / 2, 0]]) place(t, mesh(boxGeo(w, bh, d), M.concrete), px, bh / 2, pz);
+    const lbl = makeLabel(labelHtml); lbl.position.set(0, h + 0.75, 0); t.add(lbl);
+    t.position.set(x, 0, z); scene.add(t); registerEquip(t, id);
+    return t;
+  }
+  out.acidTank = tank('acidTank', -2.5, -6, 0.9, 2.4, M.hdpe, 'H₂SO₄', '황산 · 침출제', '#c92a2a', '<b>황산 탱크</b> H₂SO₄');
+  out.peroxideTank = tank('peroxideTank', 0.2, -6.5, 0.6, 1.8, M.hdpeBlue, 'H₂O₂', '과산화수소 · 환원제', '#1c7ed6', '<b>과산화수소 탱크</b> H₂O₂');
+
+  const pipes = new THREE.Group(); pipes.name = 'pipes'; scene.add(pipes);
+  out.acidPipe = makePipe(pipes, [[-2.5, 2.75, -6], [-2.5, 4.95, -6], [-2.5, 4.95, -0.85], [-0.6, 4.95, -0.85], [-0.6, 4.5, -0.85]], 0.06, M.steel, 0xffd43b);
+  out.peroxidePipe = makePipe(pipes, [[0.2, 2.1, -6.5], [0.2, 4.85, -6.5], [0.2, 4.85, -1.05], [0.2, 4.5, -1.05]], 0.05, M.steel, 0x74c0fc);
+
+  // 배기 덕트 → 가스 세정탑
+  out.duct = makePipe(pipes, [[0.75, 4.45, -0.75], [0.75, 5.3, -0.75], [2.8, 5.3, -0.75], [2.8, 5.3, -3.4], [2.8, 3.9, -3.4], [2.8, 3.9, -3.92]], 0.16, M.frp, 0xdee2e6);
+  const sc = new THREE.Group(); sc.name = 'scrubber';
+  place(sc, mesh(cylGeo(0.6, 0.6, 4.4, 32), M.frp, { cast: true }), 0, 2.2, 0);
+  for (let y = 0.6; y < 4.3; y += 0.8) place(sc, mesh(new THREE.TorusGeometry(0.61, 0.025, 6, 32), M.darkSteel).rotateX(Math.PI / 2), 0, y, 0);
+  place(sc, mesh(cylGeo(0.22, 0.6, 0.4, 32), M.frp), 0, 4.6, 0);
+  place(sc, mesh(cylGeo(0.22, 0.22, 1.6, 20), M.frp, { cast: true }), 0, 5.6, 0);       // 지붕 관통 배기 스택 (6.4 m)
+  place(sc, mesh(new THREE.TorusGeometry(0.23, 0.03, 6, 20), M.darkSteel).rotateX(Math.PI / 2), 0, 6.38, 0);
+  const slbl = makeLabel('<b>가스 세정탑</b><br><span class="sub">배기가스 처리</span>'); slbl.position.set(0, 4.9, 0); sc.add(slbl);
+  sc.position.set(2.8, 0, -4.5); scene.add(sc); registerEquip(sc, 'scrubber');
+  out.scrubber = sc;
+  out.stackTop = new THREE.Vector3(2.8, 6.42, -4.5);
+  return out;
+}
+
+// =====================================================================
+// 7. 구역 3 — 고액분리 · 정제 · 회수 (참고 공정)
+// =====================================================================
+function buildRecoveryZone(scene) {
+  const out = {};
+  const pipes = new THREE.Group(); scene.add(pipes);
+
+  // 슬러리 펌프
+  const pump = new THREE.Group(); pump.name = 'slurryPump';
+  place(pump, mesh(boxGeo(0.9, 0.12, 0.5), M.concrete), 0, 0.06, 0);
+  place(pump, mesh(cylGeo(0.16, 0.16, 0.5, 20), M.motor, { cast: true }).rotateZ(Math.PI / 2), -0.15, 0.32, 0);
+  place(pump, mesh(cylGeo(0.22, 0.22, 0.16, 24), M.darkSteel, { cast: true }).rotateZ(Math.PI / 2), 0.2, 0.34, 0);
+  pump.position.set(2.9, 0, 0); scene.add(pump); registerEquip(pump, 'slurryPump');
+  out.slurry1 = makePipe(pipes, [[0, 0.25, 0], [0, 0.34, 0], [2.65, 0.34, 0]], 0.07, M.steel, 0x63e6be);
+  out.slurry2 = makePipe(pipes, [[3.15, 0.34, 0], [3.3, 0.34, 0], [3.3, 1.65, 0], [3.8, 1.65, 0]], 0.07, M.steel, 0x63e6be);
+
+  // 필터프레스 (상부 사이드바형, 하부 케이크 통)
+  const fp = new THREE.Group(); fp.name = 'filterPress';
+  const { plateY, fixedX } = PRESS;
+  const legs = [[3.9, -0.62], [3.9, 0.62], [7.2, -0.62], [7.2, 0.62]];
+  for (const [x, z] of legs) place(fp, mesh(boxGeo(0.12, plateY + 0.6, 0.12), M.beam, { cast: true }), x, (plateY + 0.6) / 2, z);
+  place(fp, mesh(boxGeo(0.3, 1.3, 1.3), M.motor, { cast: true }), fixedX, plateY, 0);
+  for (const z of [-0.58, 0.58]) place(fp, mesh(cylGeo(0.05, 0.05, 3.4, 12), M.steel).rotateZ(Math.PI / 2), 5.55, plateY + 0.58, z);
+  const endHead = mesh(boxGeo(0.3, 1.3, 1.3), M.motor, { cast: true }); place(fp, endHead, 7.15, plateY, 0);
+  const follower = mesh(boxGeo(0.18, 1.15, 1.15), M.darkSteel, { cast: true }); fp.add(follower);
+  const ram = mesh(cylGeo(0.05, 0.05, 1, 12), M.steel); ram.rotation.z = Math.PI / 2; fp.add(ram);
+  place(fp, mesh(cylGeo(0.11, 0.11, 0.6, 16), M.darkSteel).rotateZ(Math.PI / 2), 7.6, plateY, 0);
+  const plateGeo = boxGeo(0.08, 1.0, 1.0);
+  const plates = [];
+  for (let i = 0; i < PRESS.plates; i++) { const p = mesh(plateGeo, M.plate, { cast: true }); p.position.y = plateY; fp.add(p); plates.push(p); }
+  // 케이크 통 (프레스 아래)
+  const bin = new THREE.Group();
+  const bw = 2.6, bd = 1.0, bh = 0.7;
+  for (const [w, d, px, pz] of [[bw, 0.06, 0, bd / 2], [bw, 0.06, 0, -bd / 2], [0.06, bd, bw / 2, 0], [0.06, bd, -bw / 2, 0]]) place(bin, mesh(boxGeo(w, bh, d), M.darkSteel, { cast: true }), px, bh / 2, pz);
+  place(bin, mesh(boxGeo(bw, 0.05, bd), M.darkSteel), 0, 0.025, 0);
+  bin.position.set(5.2, 0, 0); fp.add(bin);
+  const fl = makeLabel('<b>필터프레스</b><br><span class="sub">고액분리 · 아래: 잔사 케이크 통</span>'); fl.position.set(5.5, plateY + 1.25, 0); fp.add(fl);
+  scene.add(fp); registerEquip(fp, 'filterPress');
+  out.press = { group: fp, plates, follower, ram };
+  out.filtrate = makePipe(pipes, [[7.3, 1.1, 0.4], [7.3, 1.1, 1.5], [7.5, 1.1, 1.5]], 0.05, M.steel, 0x63e6be);
+
+  // 정제조
+  const pt = new THREE.Group(); pt.name = 'purifyTank';
+  place(pt, mesh(cylGeo(0.7, 0.7, 2.0, 32), M.frp, { cast: true }), 0, 1.1, 0);
+  place(pt, mesh(cylGeo(0.72, 0.72, 0.08, 32), M.darkSteel), 0, 2.12, 0);
+  place(pt, mesh(cylGeo(0.14, 0.14, 0.35, 16), M.motor), 0, 2.33, 0);
+  for (let i = 0; i < 3; i++) { const a = i * Math.PI * 2 / 3; place(pt, mesh(cylGeo(0.05, 0.05, 0.2, 8), M.darkSteel), 0.6 * Math.sin(a), 0.1, 0.6 * Math.cos(a)); }
+  const pl = makeLabel('<b>정제조</b><br><span class="sub">Fe · Al · Cu 침전 제거</span>'); pl.position.set(0, 2.9, 0); pt.add(pl);
+  pt.position.set(8.2, 0, 1.5); scene.add(pt); registerEquip(pt, 'purifyTank');
+  out.toSX = makePipe(pipes, [[8.2, 2.5, 1.5], [8.2, 4.0, 1.5], [8.2, 4.0, -3.2], [8.05, 4.0, -3.2], [8.05, 1.25, -3.2], [8.05, 1.25, -3.82]], 0.05, M.steel, 0x63e6be);
+
+  // 용매추출 믹서-세틀러 4단
+  const sx = new THREE.Group(); sx.name = 'mixerSettlers';
+  const aqCol = [0x3f9d7a, 0x4fa88a, 0x63b49a, 0x7cc0a8], orgCol = [0xd9a33f, 0xd9a33f, 0xd97a8a, 0xd9608c];
+  const spinners = [];
+  for (let i = 0; i < 4; i++) {
+    const x = 8.05 + i * 0.9;
+    place(sx, mesh(boxGeo(0.82, 0.4, 2.3), M.beam), x, 0.2, -5.0);
+    // 믹서
+    place(sx, mesh(boxGeo(0.82, 0.75, 0.6), M.frp, { cast: true }), x, 0.4 + 0.375, -4.12);
+    place(sx, mesh(cylGeo(0.1, 0.1, 0.25, 12), M.motor), x, 1.28, -4.12);
+    const sp = mesh(boxGeo(0.34, 0.03, 0.05), M.steel); place(sx, sp, x, 1.43, -4.12); spinners.push(sp);
+    // 세틀러 (투명 벽 → 두 층이 보임)
+    place(sx, new THREE.Mesh(boxGeo(0.82, 0.55, 1.65), M.acrylic), x, 0.4 + 0.275, -5.3);
+    place(sx, mesh(boxGeo(0.78, 0.28, 1.6), new THREE.MeshStandardMaterial({ color: aqCol[i], roughness: 0.2, transparent: true, opacity: 0.9 })), x, 0.4 + 0.14 + 0.01, -5.3);
+    place(sx, mesh(boxGeo(0.78, 0.16, 1.6), new THREE.MeshStandardMaterial({ color: orgCol[i], roughness: 0.2, transparent: true, opacity: 0.9 })), x, 0.4 + 0.28 + 0.09, -5.3);
+  }
+  const sl = makeLabel('<b>용매추출 (믹서-세틀러 4단)</b><br><span class="sub">유기상 / 수상 분리 · Co · Ni 분리</span>'); sl.position.set(9.4, 2.1, -5.0); sx.add(sl);
+  scene.add(sx); registerEquip(sx, 'mixerSettlers');
+  out.spinners = spinners;
+  out.toCrystal = makePipe(pipes, [[10.75, 1.25, -3.82], [10.75, 1.25, -3.3], [10.75, 3.6, -3.3], [10.0, 3.6, -3.3], [10.0, 3.6, 2.0], [10.0, 3.25, 2.0]], 0.05, M.steel, 0x63e6be);
+
+  // 결정화조
+  const cr = new THREE.Group(); cr.name = 'crystallizer';
+  place(cr, mesh(new THREE.ConeGeometry(0.8, 0.6, 32).rotateX(Math.PI), M.steel, { cast: true }), 0, 0.9, 0);
+  place(cr, mesh(cylGeo(0.8, 0.8, 1.8, 32), M.steel, { cast: true }), 0, 2.1, 0);
+  const crTop = mesh(new THREE.SphereGeometry(0.8, 32, 10, 0, Math.PI * 2, 0, Math.PI / 2), M.steel); crTop.scale.y = 0.25; place(cr, crTop, 0, 3.0, 0);
+  for (let i = 0; i < 4; i++) { const a = Math.PI / 4 + i * Math.PI / 2; place(cr, mesh(cylGeo(0.05, 0.05, 1.3, 8), M.darkSteel), 0.65 * Math.sin(a), 0.65, 0.65 * Math.cos(a)); }
+  const cl = makeLabel('<b>결정화조</b><br><span class="sub">황산염 결정 석출</span>'); cl.position.set(0, 3.7, 0); cr.add(cl);
+  cr.position.set(10, 0, 2); scene.add(cr); registerEquip(cr, 'crystallizer');
+
+  // 제품 (결정 더미 + 포대)
+  const prod = new THREE.Group(); prod.name = 'products';
+  for (const x of [9.6, 11.4]) place(prod, mesh(boxGeo(1.4, 0.14, 1.2), M.wood, { cast: true }), x, 0.07, 6.3);
+  const fibc = new THREE.MeshStandardMaterial({ color: 0xbfc3c7, roughness: 0.95 });
+  for (let i = 0; i < 3; i++) {
+    for (const [x, col] of [[9.6, COLORS.niSulfate], [11.4, COLORS.coSulfate]]) {
+      const b = mesh(new RoundedBoxGeometry(0.7, 0.75, 0.7, 2, 0.08), fibc, { cast: true }); place(prod, b, x - 0.45 + i * 0.45, 0.38, 7.6);
+      place(prod, mesh(boxGeo(0.3, 0.2, 0.01), new THREE.MeshStandardMaterial({ color: col })), x - 0.45 + i * 0.45, 0.45, 7.95);
+    }
+  }
+  scene.add(prod); registerEquip(prod, 'products');
+  out.products = prod;
+  return out;
+}
+
+/** 결정 더미 InstancedMesh: 아래부터 쌓이도록 높이 순 정렬 */
+function makeHeap(parent, cx, cz, height, mat, label, labelDz = 0) {
+  const N = Math.max(60, Math.round(650 * Math.pow(height / 0.6, 2)));
+  const baseR = 0.25 + height * 1.1;
+  const geo = new THREE.OctahedronGeometry(0.045, 0);
+  const im = new THREE.InstancedMesh(geo, mat, N);
+  im.castShadow = true; im.receiveShadow = true;
+  const items = [];
+  for (let i = 0; i < N; i++) {
+    const y = height * (1 - Math.cbrt(rng()));
+    const rmax = baseR * (1 - y / height);
+    const r = rmax * Math.sqrt(rng()), a = rng() * Math.PI * 2;
+    items.push({ x: cx + r * Math.cos(a), y: 0.16 + y, z: cz + r * Math.sin(a), s: 0.7 + rng() * 0.7, rx: rng() * 3, ry: rng() * 3 });
+  }
+  items.sort((p, q) => p.y - q.y);
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), s = new THREE.Vector3(), p = new THREE.Vector3();
+  items.forEach((it, i) => { e.set(it.rx, it.ry, 0); q.setFromEuler(e); s.setScalar(it.s); p.set(it.x, it.y, it.z); m4.compose(p, q, s); im.setMatrixAt(i, m4); });
+  im.count = 0;
+  parent.add(im);
+  const lbl = makeLabel(label, 'live'); lbl.position.set(cx, 0.16 + Math.max(height, 0.3) + 0.55, cz + labelDz); parent.add(lbl);
+  return { im, N, label: lbl };
+}
+
+// =====================================================================
+// 8. 입자 (기포 · 수증기 · 낙하물)
+// =====================================================================
+const steamTex = canvasTexture(64, 64, (c, W, H) => {
+  const grd = c.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, W / 2);
+  grd.addColorStop(0, 'rgba(255,255,255,1)'); grd.addColorStop(1, 'rgba(255,255,255,0)');
+  c.fillStyle = grd; c.fillRect(0, 0, W, H);
+}).tex;
+
+class ParticleSystem {
+  constructor(scene, { max = 160, size = 0.5, origin, spread = 0.15, rise = 0.6, life = 3.0, drift = new THREE.Vector3(0.25, 0, 0.1) }) {
+    this.max = max; this.origin = origin; this.spread = spread; this.rise = rise; this.life = life; this.drift = drift;
+    this.pos = new Float32Array(max * 3); this.col = new Float32Array(max * 4);
+    this.vel = new Float32Array(max * 3); this.age = new Float32Array(max).fill(-1);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(this.col, 4));
+    this.points = new THREE.Points(geo, new THREE.PointsMaterial({ size, map: steamTex, vertexColors: true, transparent: true, depthWrite: false, sizeAttenuation: true }));
+    this.points.frustumCulled = false;
+    scene.add(this.points);
+    this.acc = 0;
+  }
+  update(dt, rate) {
+    this.acc += rate * dt;
+    for (let i = 0; i < this.max && this.acc >= 1; i++) {
+      if (this.age[i] >= 0) continue;
+      this.acc -= 1; this.age[i] = 0;
+      this.pos[i * 3] = this.origin.x + (rng() - 0.5) * this.spread;
+      this.pos[i * 3 + 1] = this.origin.y;
+      this.pos[i * 3 + 2] = this.origin.z + (rng() - 0.5) * this.spread;
+      this.vel[i * 3] = this.drift.x * (0.5 + rng()); this.vel[i * 3 + 1] = this.rise * (0.7 + rng() * 0.6); this.vel[i * 3 + 2] = this.drift.z * (rng() - 0.3);
+    }
+    if (this.acc > 1) this.acc = 1;
+    for (let i = 0; i < this.max; i++) {
+      if (this.age[i] < 0) { this.col[i * 4 + 3] = 0; continue; }
+      this.age[i] += dt;
+      const k = this.age[i] / this.life;
+      if (k >= 1) { this.age[i] = -1; this.col[i * 4 + 3] = 0; continue; }
+      for (let a = 0; a < 3; a++) this.pos[i * 3 + a] += this.vel[i * 3 + a] * dt;
+      this.col[i * 4] = this.col[i * 4 + 1] = this.col[i * 4 + 2] = 0.92;
+      this.col[i * 4 + 3] = 0.55 * Math.sin(Math.PI * k) * (1 - k * 0.4);
+    }
+    this.points.geometry.attributes.position.needsUpdate = true;
+    this.points.geometry.attributes.color.needsUpdate = true;
+  }
+}
+
+/** 원료 덩어리 · 케이크 조각 풀 */
+function makePool(scene, n, geo, mat) {
+  const items = [];
+  for (let i = 0; i < n; i++) { const m = mesh(geo, mat, { cast: true }); m.visible = false; scene.add(m); items.push({ m, active: false, s: 0, phase: 0, vy: 0, rest: 0 }); }
+  return items;
+}
+
+// =====================================================================
+// 9. 공정 사이클 (명세 8.1)
+// =====================================================================
+const NEXT = { FEEDING: 'HEATING', HEATING: 'LEACHING', LEACHING: 'DISCHARGE', DISCHARGE: 'FEEDING' };
+class ProcessCycle {
+  constructor(onEnter) { this.onEnter = onEnter; this.state = 'IDLE'; this.t = 0; this.speed = 1; this.paused = false; this.params = null; this.cycles = 0; }
+  start(params) { this.params = params; this.cycles = 0; this.enter('FEEDING'); }
+  reset() { this.state = 'IDLE'; this.t = 0; }
+  setSpeed(k) { this.speed = k; }
+  durations() { const p = this.params; return { FEEDING: FEED_SEC, HEATING: p.heatSec, LEACHING: p.leachSec, DISCHARGE: DISCHARGE_SEC }; }
+  enter(s) { this.state = s; this.t = 0; this.onEnter?.(s, this); }
+  get progress() { return this.state === 'IDLE' ? 0 : Math.min(1, this.t / this.durations()[this.state]); }
+  /** 공정 시간(hr): 가열 + 침출 경과 */
+  get processHr() {
+    const p = this.params;
+    if (this.state === 'HEATING') return this.t / SEC_PER_HR;
+    if (this.state === 'LEACHING') return (p.heatSec + this.t) / SEC_PER_HR;
+    if (this.state === 'DISCHARGE') return p.time;
+    return 0;
+  }
+  update(dt) {
+    if (this.paused || this.state === 'IDLE') return 0;
+    const d = dt * this.speed;
+    this.t += d;
+    if (this.t >= this.durations()[this.state]) {
+      if (this.state === 'DISCHARGE') this.cycles++;
+      this.enter(NEXT[this.state]);
+    }
+    return d;
+  }
+}
+
+/** 사이클 → 공정 물리량 */
+function plantState(cy) {
+  const p = cy.params, s = cy.state, k = cy.progress;
+  const out = { temp: AMBIENT_C, liquidH: 0.1, colorT: 0, colorFrom: COLORS.acid, colorTo: COLORS.acid, rps: 0, acidFlow: false, slurryFlow: false, filtrateFlow: false };
+  if (!p) return out;
+  const cool = p.temp - 15;
+  switch (s) {
+    case 'FEEDING':
+      out.temp = cy.cycles > 0 ? THREE.MathUtils.lerp(cool, AMBIENT_C, Math.min(1, k * 1.5)) : AMBIENT_C;
+      out.liquidH = 0.1 + (p.liquidH - 0.1) * easeInOut(k);
+      out.colorFrom = COLORS.acid; out.colorTo = COLORS.slurry; out.colorT = clamp01((k - 0.55) / 0.45);
+      out.rps = k > 0.3 ? 0.35 : 0; out.acidFlow = k < 0.85;
+      break;
+    case 'HEATING':
+      out.temp = AMBIENT_C + (p.temp - AMBIENT_C) * easeOutCubic(k);
+      out.liquidH = p.liquidH; out.colorFrom = COLORS.slurry; out.colorTo = COLORS.slurry; out.rps = p.rps;
+      break;
+    case 'LEACHING':
+      out.temp = p.temp + 0.25 * Math.sin(cy.t * 1.3);
+      out.liquidH = p.liquidH; out.rps = p.rps;
+      if (k < 0.3) { out.colorFrom = COLORS.slurry; out.colorTo = COLORS.liquidLow; out.colorT = k / 0.3; }
+      else { out.colorFrom = COLORS.liquidLow; out.colorTo = COLORS.liquidHigh; out.colorT = (k - 0.3) / 0.7; }
+      break;
+    case 'DISCHARGE':
+      out.temp = p.temp - 15 * k;
+      out.liquidH = p.liquidH - (p.liquidH - 0.1) * clamp01(k / 0.6);
+      out.colorFrom = COLORS.liquidHigh; out.colorTo = COLORS.liquidHigh; out.rps = 0.35;
+      out.slurryFlow = k < 0.6; out.filtrateFlow = k < 0.7;
+      break;
+  }
+  out.nTnow = clamp01((out.temp - 40) / 55);
+  return out;
+}
+
+// =====================================================================
+// 10. UI
+// =====================================================================
+const STATE_KO = { IDLE: '대기', FEEDING: '투입', HEATING: '가열', LEACHING: '침출', DISCHARGE: '배출·회수' };
+const CONF_KO = { high: '높음', medium: '보통', low: '낮음' };
+
+function renderBanner(vm) {
+  const pill = document.getElementById('statusPill');
+  if (vm.status === 'ok') { pill.className = 'ok'; document.getElementById('statusIcon').textContent = '●'; document.getElementById('statusText').textContent = '추천 레시피 — 목표 달성 가능'; }
+  const g = vm.grade ? `${vm.grade}급` : '등급 미상';
+  document.getElementById('batchInfo').innerHTML = `<b>${vm.batchId ?? '직접 입력'}</b> · ${g}${vm.feed ? ` · ${vm.feed.feed_kg} kg` : ''}`;
+  document.getElementById('devNotice').hidden = !vm.isDevModel;
+}
+
+function intervalBar(stat, target) {
+  const lo = 80, hi = 100, pct = (v) => clamp01((v - lo) / (hi - lo)) * 100;
+  return `<div class="ibar"><div class="band" style="left:${pct(stat.low)}%;width:${pct(stat.high) - pct(stat.low)}%"></div>
+    <div class="tgt" style="left:${pct(target)}%"></div><div class="mean" style="left:calc(${pct(stat.mean)}% - 1px)"></div></div>
+    <div class="ibar-scale"><span>80</span><span>목표 ${target}%</span><span>100</span></div>`;
+}
+
+function renderCard(vm) {
+  const f = vm.feed, r = vm.recipe, p = vm.prediction, k = vm.recoveredKg, e = vm.evidence;
+  const comp = f ? `Ni ${f.ni_pct} · Co ${f.co_pct} · Li ${f.li_pct} · Mn ${f.mn_pct} · 불순물(Cu+Fe+Al) ${f2(vm.impurityTotal)} wt%` : '원료 성분 정보 없음';
+  const html = `
+    <h3><span class="dot"></span>추천 레시피</h3>
+    <div class="sec">
+      <div class="sec-h">원료</div>
+      <div class="row"><span>배치</span><b>${vm.batchId} · ${vm.grade ?? '미상'}급 · ${f?.feed_kg ?? '-'} kg</b></div>
+      <div class="muted" style="font-size:11px;line-height:1.5">${comp}</div>
+    </div>
+    <div class="sec"><div class="row"><span>목표</span><b>Ni ≥ ${vm.target.ni}% · Co ≥ ${vm.target.co}%</b></div></div>
+    <div class="sec">
+      <div class="sec-h">레시피</div>
+      <div class="big3">
+        <div><small>황산</small><b>${r.acid_l}</b> L<em>${f2(r.acid_per_feed)} L/kg</em></div>
+        <div><small>온도</small><b>${r.temp_c}</b> ℃</div>
+        <div><small>시간</small><b>${r.time_hr}</b> hr</div>
+      </div>
+    </div>
+    <div class="sec">
+      <div class="sec-h">예상 회수율 <span class="badge pred">예측</span></div>
+      <div class="rec"><div class="top"><span>Ni</span><b>${f1(p.ni.mean)}%</b></div><div class="ci">90% 구간 ${f1(p.ni.low)} ~ ${f1(p.ni.high)}</div>${intervalBar(p.ni, vm.target.ni)}</div>
+      <div class="rec"><div class="top"><span>Co</span><b>${f1(p.co.mean)}%</b></div><div class="ci">90% 구간 ${f1(p.co.low)} ~ ${f1(p.co.high)}</div>${intervalBar(p.co, vm.target.co)}</div>
+    </div>
+    ${k ? `<div class="sec">
+      <div class="sec-h">예상 회수량 <span class="badge derived">예측 기반</span></div>
+      <div class="row"><span>Ni</span><b class="mono">${f1(k.ni)} kg</b></div>
+      <div class="row"><span>Co</span><b class="mono">${f1(k.co)} kg</b></div>
+      <div class="muted" style="font-size:11px">황산염 환산 NiSO₄·6H₂O ${f1(k.niSulfate)} kg · CoSO₄·7H₂O ${f1(k.coSulfate)} kg</div>
+    </div>` : ''}
+    <div class="sec"><div class="row"><span>신뢰도</span><b>${CONF_KO[vm.confidence] ?? '-'}${vm.similarBatches != null ? ` — 유사 과거 배치 ${vm.similarBatches}건` : ''}</b></div></div>
+    ${e ? `<div class="sec">
+      <div class="sec-h">근거 <span class="badge meas">실측</span></div>
+      <div style="font-size:12px;line-height:1.55">원본 실측: 황산 ${e.acid_l} L · ${e.temp_c} ℃ · ${e.time_hr} hr<br>→ Ni ${f2(e.ni_recovery_pct)}% · Co ${f2(e.co_recovery_pct)}%</div>
+    </div>` : ''}
+    <div class="note">${vm.message}${vm.modelVersion === 'demo_assumed' ? '<br>' + DEMO_NOTE : ''}${vm.warnings.length ? '<br>경고: ' + vm.warnings.join(', ') : ''}</div>`;
+  document.getElementById('recipeCard').innerHTML = html;
+}
+
+function renderProgress(cy, st) {
+  const order = ['FEEDING', 'HEATING', 'LEACHING', 'DISCHARGE'];
+  const idx = order.indexOf(cy.state);
+  order.forEach((s, i) => { document.getElementById('step-' + s).className = 'step' + (i === idx ? ' active' : i < idx ? ' done' : ''); });
+  const p = cy.params;
+  const hr = cy.processHr;
+  document.getElementById('barFill').style.width = (p ? clamp01(hr / p.time) * 100 : 0) + '%';
+  document.getElementById('progText').innerHTML = p
+    ? `${STATE_KO[cy.state]} · 공정 시간 <b>${hr.toFixed(1)} / ${p.time.toFixed(1)} hr</b> · 온도 <b>${st.temp.toFixed(1)} ℃</b> (목표 ${p.temp} ℃) · 교반 ${st.rps.toFixed(2)} rps${cy.speed !== 1 ? ` · ${cy.speed}배속` : ''}${cy.paused ? ' · 일시정지' : ''}`
+    : '대기';
+}
+
+// 설비 정보 (명세 6.3)
+function equipInfo(id, vm, cy, st) {
+  const p = cy.params;
+  const SRC_PROC = '자원리싸이클링 32(4), 2023 습식 공정 리뷰 · 영풍 건·습식 통합 공정 보도';
+  const grade = id.startsWith('orePile') ? id.slice(-1) : null;
+  if (grade) {
+    const share = (GRADE_COUNT[grade] / GRADE_TOTAL * 100).toFixed(1);
+    return { name: `${grade}급 블랙파우더 원료`, tag: 'data',
+      role: '폐배터리를 방전 · 파쇄 · 선별해 얻은 검은 분말(블랙파우더). 톤백에 담겨 반입된다.',
+      live: `원본 데이터 비율 ${share}% (${GRADE_COUNT[grade]} / ${GRADE_TOTAL} 배치)<br>성분 중앙값 ${GRADE_STATS[grade].median}<br>실측 최대 회수율 ${GRADE_STATS[grade].max}`
+        + (grade === 'C' ? '<br>C급은 Ni ≥ 95 · Co ≥ 90 동시 달성 사례 없음' : '') + (vm.grade === grade ? '<br><b>현재 배치 원료</b>' : ''),
+      src: '원본 데이터 420행 (학생배포용 xlsx) · 톤백 개수는 비율에 비례(20개 기준)' };
+  }
+  const T = {
+    reactor: { name: '침출 반응조', tag: 'linked', role: '황산 + 과산화수소(환원제)로 블랙파우더의 Ni · Co를 녹인다. 스팀 재킷으로 가열하고 피치드 블레이드 터빈으로 교반한다.',
+      live: p ? `온도 ${st.temp.toFixed(1)} / 목표 ${p.temp} ℃<br>공정 시간 ${cy.processHr.toFixed(1)} / ${p.time.toFixed(1)} hr<br>교반 ${st.rps.toFixed(2)} rps · 액위 ${(st.liquidH / REACTOR.H * 100).toFixed(0)}%` : '',
+      src: '레시피 온도 · 시간 · 황산량 연동 · 95 ℃ 상한: 멘토 답변 3-2' },
+    acidTank: { name: '황산 저장 탱크', tag: 'linked', role: '침출제인 황산(H₂SO₄)을 저장하고 반응조에 정량 공급한다. 방류벽으로 누출에 대비한다.',
+      live: `레시피 투입량 ${vm.recipe.acid_l} L (원료 1 kg당 ${f2(vm.recipe.acid_per_feed)} L)`, src: '레시피 황산량 연동' },
+    peroxideTank: { name: '과산화수소 탱크', tag: 'ref', role: '환원제(H₂O₂). Co³⁺ · Ni³⁺를 녹기 쉬운 2가로 환원해 침출을 돕는다.', live: '데이터에 투입량 없음 — 수치 연동 없음', src: SRC_PROC },
+    scrubber: { name: '가스 세정탑 (스크러버)', tag: 'ref', role: '반응조 배기가스를 세정해 배출한다. 온도가 높을수록 배기 수증기가 늘어난다.',
+      live: `배기 수증기 ∝ (현재 온도 정규화)² · 현재 ${(st.nTnow * 100).toFixed(0)}%`, src: '유해가스 발생 전 95 ℃ 상한: 멘토 답변 3-2' },
+    hopper: { name: '투입 호퍼', tag: 'ref', role: '톤백의 블랙파우더를 받아 컨베이어로 보낸다.', live: '', src: SRC_PROC },
+    conveyor: { name: '경사 벨트 컨베이어', tag: 'ref', role: '호퍼의 원료를 반응조 상부 투입구까지 올린다.', live: `벨트 속도 ${CONVEYOR.speed} m/s (연출값)`, src: '' },
+    crane: { name: '천장 크레인', tag: 'ref', role: '등급별 톤백을 집어 투입 호퍼 위로 옮긴다.', live: vm.grade ? `현재 배치: ${vm.grade}급 톤백 운반` : '', src: '' },
+    slurryPump: { name: '슬러리 펌프', tag: 'ref', role: '침출이 끝난 슬러리를 필터프레스로 보낸다.', live: '', src: SRC_PROC },
+    filterPress: { name: '필터프레스', tag: 'ref', role: '침출액(여액)과 녹지 않은 잔사(케이크)를 분리한다. 판이 열리면 케이크가 아래 통으로 떨어진다.', live: '', src: SRC_PROC },
+    purifyTank: { name: '정제조', tag: 'ref', role: 'pH를 조절해 Fe · Al · Cu 불순물을 침전시켜 제거한다. 원료의 불순물 함량이 클수록 부담이 커진다.',
+      live: vm.impurityTotal != null ? `현재 원료 불순물 합 ${f2(vm.impurityTotal)} wt%` : '', src: SRC_PROC },
+    mixerSettlers: { name: '용매추출 (믹서-세틀러)', tag: 'ref', role: '추출제(D2EHPA, PC88A, Cyanex 272 등)가 든 유기상과 섞었다가 가라앉혀 금속을 단계별로 분리한다.', live: '', src: SRC_PROC },
+    crystallizer: { name: '결정화조', tag: 'ref', role: '분리된 용액을 농축 · 냉각해 황산니켈 · 황산코발트 결정을 석출한다.', live: '', src: SRC_PROC },
+    products: { name: '회수 제품', tag: 'linked', role: '황산니켈(NiSO₄·6H₂O, 청록) · 황산코발트(CoSO₄·7H₂O, 적색). 양극재 전구체 원료로 쓰인다.',
+      live: vm.recoveredKg ? `예측 기반 회수량 Ni ${f1(vm.recoveredKg.ni)} kg · Co ${f1(vm.recoveredKg.co)} kg<br>황산염 환산 ${f1(vm.recoveredKg.niSulfate)} kg · ${f1(vm.recoveredKg.coSulfate)} kg` : '',
+      src: '결정 더미 높이 ∝ 예측 회수량 (25 kg = 0.6 m)' },
+    batteryPallet: { name: '폐배터리 팩', tag: 'ref', role: '블랙파우더의 출처. 방전 · 파쇄 · 선별 전처리를 거쳐 분말이 된다. 영풍은 팩 · 모듈을 파쇄한 플레이크를 쓰기도 한다.', live: '', src: '영풍 건·습식 통합 공정 보도' },
+    controlPanel: { name: '제어반', tag: 'ref', role: '공정 상태를 표시하는 운전 화면.', live: '', src: '' },
+  };
+  return T[id] ?? { name: id, tag: 'ref', role: '', live: '', src: '' };
+}
+const TAG_KO = { linked: '수치 연동', ref: '참고 공정', data: '원본 데이터' };
+function renderEquipmentInfo(id, vm, cy, st) {
+  const el = document.getElementById('equipBody');
+  if (!id) { el.className = 'muted'; el.textContent = '3D 화면에서 설비를 클릭하세요.'; return; }
+  const info = equipInfo(id, vm, cy, st);
+  el.className = '';
+  el.innerHTML = `<div class="eq-name">${info.name}<span class="tag ${info.tag}">${TAG_KO[info.tag]}</span></div>
+    <div class="eq-role">${info.role}</div>${info.live ? `<div class="eq-live">${info.live}</div>` : ''}
+    ${info.src ? `<div class="eq-src">근거: ${info.src}</div>` : ''}<div class="eq-src">교육용 재구성 — 실제 영풍 설비 치수 · 배치가 아님</div>`;
+}
+
+// =====================================================================
+// 11. 진입
+// =====================================================================
+function main() {
+  // 데이터
+  let vm;
+  try {
+    // 통합: Streamlit 데모가 Module 3 결과를 window.__TWIN_INPUT__ 으로 넘기면 그것을 읽는다
+    const sc = parseInput(window.__TWIN_INPUT__ ?? DEMO_INPUT);
+    const { errors, warnings } = validateRecipe(sc.recipe);
+    if (errors.length) { showFatal('입력값 오류: ' + errors.join(' / ')); return; }
+    vm = toViewModel(sc, warnings);
+  } catch (e) { showFatal('입력값 오류: ' + e.message); return; }
+  renderBanner(vm);
+  renderCard(vm);
+
+  // 장면
+  const R3 = createRenderer(viewport);
+  const { renderer, scene, camera, labelRenderer, controls, composer, sun } = R3;
+  const shell = buildShell(scene);
+  const raw = buildRawMaterialZone(scene, vm);
+  const crane = buildCrane(scene);
+  const conv = buildConveyor(scene);
+  const reactor = buildReactor(scene);
+  const tanks = buildTanksAndPipes(scene);
+  const rec = buildRecoveryZone(scene);
+
+  let params = mapRecipe(vm);
+  const heapGroup = new THREE.Group(); scene.add(heapGroup);
+  let heaps = null;
+  function buildHeaps() {
+    heapGroup.clear();
+    heaps = {
+      ni: makeHeap(heapGroup, 9.6, 6.3, params.niHeapH, M.niCrystal, `<b>NiSO₄·6H₂O</b> <span class="badge derived">예측 기반</span><br>Ni ${vm.recoveredKg ? f1(vm.recoveredKg.ni) : '-'} kg`, -0.45),
+      co: makeHeap(heapGroup, 11.4, 6.3, params.coHeapH, M.coCrystal, `<b>CoSO₄·7H₂O</b> <span class="badge derived">예측 기반</span><br>Co ${vm.recoveredKg ? f1(vm.recoveredKg.co) : '-'} kg`, 0.55),
+    };
+  }
+  buildHeaps();
+
+  // 운반 톤백 · 원료 덩어리 · 케이크 조각
+  const carried = makeTonbag(vm.grade); carried.visible = false; scene.add(carried);
+  const staged = vm.grade ? slotPosition(vm.grade, PILE_COUNT[vm.grade]) : new THREE.Vector3(-10.5, 0, 0);
+  const chunks = makePool(scene, 10, new THREE.DodecahedronGeometry(0.11, 0), M.powder);
+  const cakes = makePool(scene, 28, boxGeo(0.2, 0.05, 0.2), M.cake);
+  const steam = new ParticleSystem(scene, { origin: tanks.stackTop, max: 160, size: 0.6, rise: 0.7, life: 3.2 });
+
+  // 사이클
+  let chunkSpawned = 0, cakeSpawnedFor = new Set();
+  const cycle = new ProcessCycle((s) => {
+    if (s === 'FEEDING') chunkSpawned = 0;
+    // 결정 더미 · 케이크는 다음 배출이 시작될 때 비운다 (한 사이클 내내 결과가 보이게)
+    if (s === 'DISCHARGE') {
+      heaps.ni.im.count = 0; heaps.co.im.count = 0;
+      for (const c of cakes) { c.active = false; c.m.visible = false; }
+      cakeSpawnedFor = new Set();
+    }
+  });
+  cycle.start(params);
+
+  // 카메라
+  let camAnim = null;
+  function setCameraPreset(name, instant = false) {
+    const pr = CAMERA_PRESETS[name]; if (!pr) return;
+    const to = { pos: new THREE.Vector3(...pr.pos), target: new THREE.Vector3(...pr.target) };
+    if (instant) { camera.position.copy(to.pos); controls.target.copy(to.target); controls.update(); camAnim = null; }
+    else camAnim = { from: { pos: camera.position.clone(), target: controls.target.clone() }, to, t: 0 };
+    document.querySelectorAll('#camBtns button').forEach((b) => b.classList.toggle('on', b.dataset.cam === name));
+  }
+  setCameraPreset(OPT.cam, true);
+  document.querySelectorAll('#camBtns button').forEach((b) => b.addEventListener('click', () => setCameraPreset(b.dataset.cam)));
+
+  // 단면 · 라벨
+  function setCutaway(on) { reactor.cut.visible = on; reactor.closed.visible = !on; document.getElementById('btnCut').classList.toggle('on', on); }
+  let cutOn = OPT.cut; setCutaway(cutOn);
+  document.getElementById('btnCut').addEventListener('click', () => { cutOn = !cutOn; setCutaway(cutOn); });
+  let labelsOn = OPT.labels;
+  const applyLabels = () => { labelRenderer.domElement.style.display = labelsOn ? '' : 'none'; document.getElementById('btnLabels').classList.toggle('on', labelsOn); };
+  applyLabels();
+  document.getElementById('btnLabels').addEventListener('click', () => { labelsOn = !labelsOn; applyLabels(); });
+
+  // 재생 제어
+  const btnPause = document.getElementById('btnPause');
+  btnPause.addEventListener('click', () => { cycle.paused = !cycle.paused; btnPause.textContent = cycle.paused ? '▶ 재생' : '⏸ 일시정지'; });
+  for (const k of [1, 4]) document.getElementById('btnSpeed' + k).addEventListener('click', () => {
+    cycle.setSpeed(k); document.getElementById('btnSpeed1').classList.toggle('on', k === 1); document.getElementById('btnSpeed4').classList.toggle('on', k === 4);
+  });
+
+  // 설비 클릭
+  let selected = null, selBox = null;
+  const raycaster = new THREE.Raycaster(), ndc = new THREE.Vector2();
+  let downAt = null;
+  renderer.domElement.addEventListener('pointerdown', (ev) => { downAt = [ev.clientX, ev.clientY]; });
+  renderer.domElement.addEventListener('pointerup', (ev) => {
+    if (!downAt || Math.hypot(ev.clientX - downAt[0], ev.clientY - downAt[1]) > 5) return;
+    const rect = renderer.domElement.getBoundingClientRect();
+    ndc.set(((ev.clientX - rect.left) / rect.width) * 2 - 1, -((ev.clientY - rect.top) / rect.height) * 2 + 1);
+    raycaster.setFromCamera(ndc, camera);
+    const hits = raycaster.intersectObjects([...EQUIP.values()], true);
+    let id = null;
+    for (const h of hits) { let o = h.object; while (o && !o.userData.equip) o = o.parent; if (o && o.visible !== false) { id = o.userData.equip; break; } }
+    selectEquip(id);
+  });
+  function selectEquip(id) {
+    selected = id;
+    if (selBox) { scene.remove(selBox); selBox.geometry.dispose(); selBox = null; }
+    if (id) {
+      const box = new THREE.Box3().setFromObject(EQUIP.get(id));
+      selBox = new THREE.Box3Helper(box.expandByScalar(0.08), COLORS.safety);
+      scene.add(selBox);
+    }
+    renderEquipmentInfo(id, vm, cycle, lastState);
+    if (id) document.getElementById('equipCard').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+
+  // 개발용 슬라이더 (?debug=1, 명세 8.2)
+  if (OPT.debug) {
+    const dp = document.getElementById('debugPanel'); dp.hidden = false;
+    const cur = { acid_l: vm.recipe.acid_l, temp_c: vm.recipe.temp_c, time_hr: vm.recipe.time_hr };
+    dp.innerHTML = `<h4>개발용 — 애니메이션 확인</h4><p>애니메이션 입력만 바꾼다. 카드 · 예측값은 그대로다 (예측값 아님).</p>
+      <label>황산<input type="range" id="dAcid" min="400" max="1500" step="10" value="${cur.acid_l}"><output id="oAcid">${cur.acid_l} L</output></label>
+      <label>온도<input type="range" id="dTemp" min="40" max="95" step="1" value="${cur.temp_c}"><output id="oTemp">${cur.temp_c} ℃</output></label>
+      <label>시간<input type="range" id="dTime" min="1" max="8" step="0.5" value="${cur.time_hr}"><output id="oTime">${cur.time_hr} hr</output></label>`;
+    const onChange = () => {
+      cur.acid_l = +document.getElementById('dAcid').value; cur.temp_c = +document.getElementById('dTemp').value; cur.time_hr = +document.getElementById('dTime').value;
+      document.getElementById('oAcid').textContent = cur.acid_l + ' L'; document.getElementById('oTemp').textContent = cur.temp_c + ' ℃'; document.getElementById('oTime').textContent = cur.time_hr + ' hr';
+      params = mapRecipe(vm, cur); cycle.start(params);
+    };
+    dp.querySelectorAll('input').forEach((i) => i.addEventListener('input', onChange));
+    window.__mapRecipe = (o) => mapRecipe(vm, o);   // 콘솔 확인용 (명세 11.1)
+  }
+
+  // 크기
+  function resize() {
+    const w = viewport.clientWidth, h = viewport.clientHeight;
+    camera.aspect = w / Math.max(1, h); camera.updateProjectionMatrix();
+    renderer.setSize(w, h); labelRenderer.setSize(w, h); composer.setSize(w, h);
+  }
+  new ResizeObserver(resize).observe(viewport); resize();
+
+  // ---------- 프레임 갱신 ----------
+  const liquidColor = new THREE.Color(), cA = new THREE.Color(), cB = new THREE.Color();
+  let lastState = plantState(cycle);
+  let clockT = 0;
+
+  function craneTrack(t) {
+    // 투입 단계 시간표 (FEED_SEC = 8 s 기준)
+    const park = { x: HOPPER_POS.x, z: HOPPER_POS.z };
+    const pick = { x: staged.x, z: staged.z };
+    const up = CRANE.hookUp, downPick = staged.y + 1.0, downDrop = 3.65;
+    const L = (a, b, k) => a + (b - a) * easeInOut(clamp01(k));
+    let x, z, y, bag = 'staged', bagScale = 1;
+    if (t < 1.6) { x = L(park.x, pick.x, t / 1.6); z = L(park.z, pick.z, t / 1.6); y = up; }
+    else if (t < 2.4) { x = pick.x; z = pick.z; y = L(up, downPick, (t - 1.6) / 0.8); }
+    else if (t < 3.0) { x = pick.x; z = pick.z; y = L(downPick, up, (t - 2.4) / 0.6); bag = 'hook'; }
+    else if (t < 4.6) { x = L(pick.x, park.x, (t - 3.0) / 1.6); z = L(pick.z, park.z, (t - 3.0) / 1.6); y = up; bag = 'hook'; }
+    else if (t < 5.0) { x = park.x; z = park.z; y = L(up, downDrop, (t - 4.6) / 0.4); bag = 'hook'; }
+    else if (t < 6.8) { x = park.x; z = park.z; y = downDrop; bag = 'hook'; bagScale = 1 - 0.7 * (t - 5.0) / 1.8; }
+    else { x = park.x; z = park.z; y = L(downDrop, up, (t - 6.8) / 1.2); bag = 'none'; }
+    return { x, z, y, bag, bagScale };
+  }
+
+  function stepSim(dt) {
+    const d = cycle.update(dt);
+    const st = plantState(cycle);
+    const sdt = cycle.paused ? 0 : dt * cycle.speed;   // 시뮬레이션 시간
+    clockT += sdt;
+
+    // 크레인 · 톤백
+    if (cycle.state === 'FEEDING') {
+      const c = craneTrack(cycle.t);
+      setCrane(crane, c.x, c.z, c.y);
+      if (c.bag === 'staged') { carried.visible = true; carried.position.copy(staged); carried.scale.set(1, 1, 1); }
+      else if (c.bag === 'hook') { carried.visible = true; carried.position.set(c.x, c.y - 1.0 + (1 - c.bagScale) * 0.2, c.z); carried.scale.set(1, c.bagScale, 1); }
+      else carried.visible = false;
+      // 원료 덩어리 생성 (5.0 ~ 6.8 s)
+      while (cycle.t > 5.0 && chunkSpawned < 6 && cycle.t > 5.0 + chunkSpawned * 0.3) {
+        const ch = chunks.find((c) => !c.active);
+        if (!ch) break;
+        ch.active = true; ch.s = 0; ch.phase = 0; ch.m.visible = true; chunkSpawned++;
+      }
+    } else {
+      setCrane(crane, HOPPER_POS.x, HOPPER_POS.z, CRANE.hookUp);
+      carried.visible = cycle.state !== 'IDLE' && vm.grade != null;
+      carried.position.copy(staged); carried.scale.set(1, 1, 1);
+    }
+    for (const ch of chunks) {
+      if (!ch.active) continue;
+      if (ch.phase === 0) {
+        ch.s += CONVEYOR.speed * sdt;
+        const p = CONVEYOR.start.clone().addScaledVector(conv.dir, Math.min(ch.s, conv.len)).addScaledVector(conv.normal, 0.13);
+        ch.m.position.copy(p); ch.m.rotation.x += sdt * 2;
+        if (ch.s >= conv.len) { ch.phase = 1; ch.s = 0; }
+      } else {
+        ch.s += sdt / 0.35;
+        ch.m.position.lerpVectors(CONVEYOR.end, INLET, Math.min(1, ch.s));
+        if (ch.s >= 1) { ch.active = false; ch.m.visible = false; }
+      }
+    }
+
+    // 컨베이어 (상시)
+    conv.beltTex.offset.x -= CONVEYOR.speed * sdt / 0.5;
+    for (const r of conv.rollers) r.rotation.y -= sdt * CONVEYOR.speed / 0.06;
+
+    // 반응조
+    const { Y0 } = REACTOR;
+    const h = st.liquidH;
+    reactor.liquid.scale.y = Math.max(0.01, h);
+    reactor.liquid.position.y = Y0 + h / 2;
+    reactor.surface.position.y = Y0 + h + 0.002;
+    cA.setHex(st.colorFrom); cB.setHex(st.colorTo); liquidColor.copy(cA).lerp(cB, st.colorT);
+    M.liquid.color.copy(liquidColor);
+    reactor.rotor.rotation.y += st.rps * Math.PI * 2 * sdt;
+    const pos = reactor.surfGeo.attributes.position, base = reactor.surfBase;
+    const depth = 0.06 * st.rps, phase = reactor.rotor.rotation.y;
+    for (let i = 0; i < pos.count; i++) {
+      const x = base[i * 3], y = base[i * 3 + 1];
+      const r = Math.hypot(x, y) / 1.56, a = Math.atan2(y, x);
+      pos.setZ(i, -depth * (1 - r * r) + 0.025 * st.rps * r * Math.sin(3 * a - phase * 1.5) + 0.01 * Math.sin(clockT * 3 + r * 9));
+    }
+    pos.needsUpdate = true; reactor.surfGeo.computeVertexNormals();
+    reactor.needle.rotation.z = -THREE.MathUtils.degToRad(gaugeDeg(st.temp));
+    M.jacket.emissiveIntensity = (cycle.state === 'HEATING' || cycle.state === 'LEACHING') ? 0.18 * st.nTnow : 0;
+    reactor.levelBar.scale.y = Math.max(0.01, h * 3.0 / REACTOR.H);
+    reactor.levelBar.position.y = (h * 3.0 / REACTOR.H) / 2;
+
+    // 기포 (가열 · 침출 중)
+    const heating = cycle.state === 'HEATING' || cycle.state === 'LEACHING';
+    const want = heating ? Math.round(4 + 26 * st.nTnow) : 0;
+    const m4 = new THREE.Matrix4();
+    let n = 0;
+    for (let i = 0; i < reactor.bubbleState.length; i++) {
+      const b = reactor.bubbleState[i];
+      if (!b.alive && i < want) { const rr = 1.3 * Math.sqrt(rng()), aa = rng() * Math.PI * 2; Object.assign(b, { x: rr * Math.cos(aa), z: rr * Math.sin(aa), y: Y0 + 0.2 + rng() * 0.4, v: 0.5 + rng() * 0.6, alive: true }); }
+      if (!b.alive) continue;
+      b.y += b.v * sdt; b.x += Math.cos(phase + i) * 0.1 * sdt; b.z += Math.sin(phase + i) * 0.1 * sdt;
+      if (b.y > Y0 + h - 0.03) { b.alive = false; continue; }
+      m4.makeTranslation(b.x, b.y, b.z); reactor.bubbles.setMatrixAt(n++, m4);
+    }
+    reactor.bubbles.count = n; reactor.bubbles.instanceMatrix.needsUpdate = true;
+
+    // 수증기 (스크러버 스택)
+    steam.update(sdt, heating ? 40 * st.nTnow * st.nTnow : 2);
+
+    // 배관 흐름
+    for (const f of [tanks.acidPipe.flow, tanks.peroxidePipe.flow]) f.on = st.acidFlow;
+    tanks.duct.flow.on = heating && st.nTnow > 0.2;
+    rec.slurry1.flow.on = rec.slurry2.flow.on = st.slurryFlow;
+    rec.filtrate.flow.on = st.filtrateFlow;
+    rec.toSX.flow.on = rec.toCrystal.flow.on = cycle.state === 'DISCHARGE';
+    updateFlows(sdt);
+
+    // 필터프레스 (배출 단계)
+    const pr = rec.press;
+    let followerX = PRESS.closedFollowerX, openK = 0;
+    if (cycle.state === 'DISCHARGE') {
+      const k = cycle.progress;
+      if (k < 0.25) followerX = PRESS.closedFollowerX;
+      else if (k < 0.4) followerX = THREE.MathUtils.lerp(PRESS.closedFollowerX, PRESS.openFollowerX, easeInOut((k - 0.25) / 0.15));
+      else if (k < 0.75) { followerX = PRESS.openFollowerX; openK = (k - 0.4) / 0.35; }
+      else { followerX = THREE.MathUtils.lerp(PRESS.openFollowerX, PRESS.closedFollowerX, easeInOut((k - 0.75) / 0.25)); openK = 1 - (k - 0.75) / 0.25; }
+    }
+    pr.follower.position.set(followerX, PRESS.plateY, 0);
+    pr.ram.scale.y = Math.max(0.05, 7.3 - followerX);
+    pr.ram.position.set((followerX + 7.3) / 2, PRESS.plateY, 0);
+    const NP = PRESS.plates;
+    for (let i = 0; i < NP; i++) {
+      const closedX = PRESS.fixedX + 0.2 + i * 0.085;
+      const openX = PRESS.openFollowerX - 0.15 - (NP - 1 - i) * 0.11;
+      // 뒤쪽 판부터 차례로 이동
+      const order = (NP - 1 - i) / NP;
+      const k = clamp01((openK - order) * NP / 2);
+      pr.plates[i].position.x = THREE.MathUtils.lerp(closedX, openX, cycle.state === 'DISCHARGE' && cycle.progress >= 0.75 ? openK : k);
+      if (cycle.state === 'DISCHARGE' && cycle.progress < 0.75 && k > 0.5 && !cakeSpawnedFor.has(i)) {
+        cakeSpawnedFor.add(i);
+        for (let j = 0; j < 2; j++) {
+          const c = cakes.find((q) => !q.active); if (!c) break;
+          c.active = true; c.m.visible = true; c.vy = 0;
+          c.m.position.set(pr.plates[i].position.x - 0.05, PRESS.plateY - 0.3, (rng() - 0.5) * 0.6);
+          c.m.rotation.set(rng(), rng(), rng());
+          c.rest = 0.08 + rng() * 0.12;
+        }
+      }
+    }
+    for (const c of cakes) {
+      if (!c.active || c.m.position.y <= c.rest) continue;
+      c.vy -= 9.8 * sdt; c.m.position.y = Math.max(c.rest, c.m.position.y + c.vy * sdt);
+    }
+
+    // 결정 더미 (배출 후반)
+    if (cycle.state === 'DISCHARGE') {
+      const frac = clamp01((cycle.progress - 0.5) / 0.5);
+      heaps.ni.im.count = Math.floor(heaps.ni.N * frac); heaps.co.im.count = Math.floor(heaps.co.N * frac);
+    }
+
+    // 믹서 · 경광등
+    for (const s of rec.spinners) s.rotation.y += sdt * 6;
+    M.beacon.emissiveIntensity = 0.6 + 1.8 * (Math.sin(clockT * Math.PI * 2) > 0 ? 1 : 0.15);
+
+    lastState = st;
+    return st;
+  }
+
+  // 초기 시점 이동 (?seek=초, 검증 · 스크린샷용)
+  for (let s = 0; s < OPT.seek; s += 1 / 30) stepSim(1 / 30);
+  if (OPT.pick && EQUIP.has(OPT.pick)) { scene.updateMatrixWorld(); selectEquip(OPT.pick); }
+
+  // 성능 모드 (명세 10장)
+  let perfMode = false, slowSec = 0, fpsAcc = 0, fpsN = 0;
+  function enablePerfMode() {
+    perfMode = true; renderer.shadowMap.enabled = false; sun.castShadow = false;
+    scene.traverse((o) => { if (o.material) o.material.needsUpdate = true; });
+    document.getElementById('perfBadge').hidden = false;
+  }
+
+  // 가려진 라벨 흐리게 (설비 뒤 라벨이 앞에 겹쳐 보이지 않게)
+  const labelObjs = [];
+  scene.traverse((o) => { if (o.isCSS2DObject) labelObjs.push(o); });
+  const occluders = [...EQUIP.values()];
+  const occRay = new THREE.Raycaster(), lp = new THREE.Vector3(), ldir = new THREE.Vector3();
+  const visibleChain = (o) => { for (; o; o = o.parent) if (!o.visible) return false; return true; };
+  const equipOf = (o) => { for (; o; o = o.parent) if (o.userData.equip) return o.userData.equip; return null; };
+  function updateLabelOcclusion() {
+    scene.updateMatrixWorld();
+    for (const l of labelObjs) {
+      l.getWorldPosition(lp);
+      ldir.copy(lp).sub(camera.position); const dist = ldir.length(); ldir.normalize();
+      occRay.set(camera.position, ldir); occRay.far = Math.max(0.1, dist - 0.3);
+      const own = equipOf(l);
+      const blocked = occRay.intersectObjects(occluders, true).some((h) =>
+        !h.object.material?.transparent && visibleChain(h.object) && equipOf(h.object) !== own);
+      l.userData.el.style.opacity = blocked ? '0.15' : '1';
+    }
+  }
+
+  // 라벨 · 패널 갱신 (10 Hz)
+  let uiAcc = 1, scadaAcc = 1, occAcc = 1;
+  const clock = new THREE.Clock();
+  function frame() {
+    requestAnimationFrame(frame);
+    const dt = Math.min(clock.getDelta(), 0.1);
+    const st = stepSim(dt);
+
+    if (camAnim) {
+      camAnim.t = Math.min(1, camAnim.t + dt / 0.9);
+      const k = easeInOut(camAnim.t);
+      camera.position.lerpVectors(camAnim.from.pos, camAnim.to.pos, k);
+      controls.target.lerpVectors(camAnim.from.target, camAnim.to.target, k);
+      if (camAnim.t >= 1) camAnim = null;
+    }
+    controls.update();
+    shell.ceiling.visible = controls.getPolarAngle() > 0.35;   // 위에서 볼 때 천장 보 숨김
+
+    uiAcc += dt; scadaAcc += dt; occAcc += dt;
+    if (occAcc > 0.25 && labelsOn) { occAcc = 0; updateLabelOcclusion(); }
+    if (uiAcc > 0.1) {
+      uiAcc = 0;
+      const p = cycle.params;
+      reactor.label.userData.el.innerHTML = `<b>침출 반응조</b> · ${STATE_KO[cycle.state]}<br>${st.temp.toFixed(1)} ℃ · ${cycle.processHr.toFixed(1)} / ${p.time.toFixed(1)} hr`;
+      reactor.gaugeLbl.userData.el.innerHTML = `<b>${st.temp.toFixed(1)} ℃</b> <span class="sub">/ ${p.temp}</span>`;
+      renderProgress(cycle, st);
+      if (selected) renderEquipmentInfo(selected, vm, cycle, st);
+    }
+    if (scadaAcc > 0.5) {
+      scadaAcc = 0;
+      drawScada(raw.screen, { state: cycle.state, temp: st.temp, target: cycle.params.temp, hr: cycle.processHr, time: cycle.params.time, rps: st.rps, level: st.liquidH / REACTOR.H });
+    }
+
+    if (perfMode) renderer.render(scene, camera); else composer.render();
+    labelRenderer.render(scene, camera);
+
+    if (OPT.autoperf && !perfMode) {
+      fpsAcc += dt; fpsN++;
+      if (fpsAcc >= 1) { const fps = fpsN / fpsAcc; slowSec = fps < 25 ? slowSec + 1 : 0; fpsAcc = 0; fpsN = 0; if (slowSec >= 3) enablePerfMode(); }
+    }
+  }
+  frame();
+  window.__twin = { cycle, vm, get params() { return params; } };
+}
+
+try { main(); }
+catch (e) { console.error(e); showFatal('화면을 만드는 중 오류가 발생했습니다: ' + e.message); }
+</script>
 </body>
 </html>

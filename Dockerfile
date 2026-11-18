@@ -25,12 +25,10 @@ RUN pip install --no-cache-dir -r requirements-runtime.txt
 
 COPY . .
 
-# 모듈 1 정제 → 모듈 2 학습 → 3D 씬 데이터 내보내기 → 단일 파일 묶기
+# 모듈 1 정제 → 모듈 2 학습. 3D 화면(docs/modeling/index.html)은 단일 파일이라 빌드할 것이 없다.
 # 원본 .xlsx 는 레포에 들어 있으므로 외부 다운로드가 없다.
 RUN python -m module1_preprocessing.cleaning \
- && python -m module2_prediction.train \
- && python docs/modeling/export_data.py \
- && python docs/modeling/build_standalone.py
+ && python -m module2_prediction.train
 
 EXPOSE 8501 8000
 

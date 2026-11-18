@@ -31,17 +31,21 @@ docker compose up --build
 
 멈출 때는 `Ctrl+C`, 정리는 `docker compose down`.
 
-### 3D 씬만 따로 보기
+### 3D 화면만 따로 보기
 
-디지털 트윈은 정적 페이지라 파이썬 없이도 열린다.
+디지털 트윈(P5)은 HTML 파일 하나라 파이썬 없이 열린다.
+`docs/modeling/index.html` 을 Chrome 이나 Edge 로 연다 (인터넷 필요 — Three.js CDN).
 
-```bash
-python -m http.server 8000 --directory docs
-# http://localhost:8000/modeling/
+주소 뒤에 옵션을 붙이면 원하는 장면을 바로 띄운다.
+
+```text
+index.html?cam=reactor&seek=14     침출 중인 반응조
+index.html?cam=recovery&seek=27    결정이 쌓이는 배출 단계
+index.html?debug=1                 개발용 슬라이더 (애니메이션만 바뀜, 예측값 아님)
 ```
 
-> `docs/modeling/index.html` 을 **더블클릭하면 빈 화면이 뜬다.** 브라우저가 `file://`
-> 에서 ES 모듈과 `fetch()` 를 막기 때문이다. 위처럼 서버를 거쳐야 한다.
+> 단독으로 열면 데모 입력(BP-2025-0074 실측을 근거로 한 가정값)을 보여 준다.
+> 실제 추천 결과는 Streamlit 데모에서 목표 달성 레시피가 나왔을 때 화면에 들어간다.
 > GitHub Pages(Settings → Pages → `main` / `docs`)를 켜면 주소 하나로 열린다.
 
 ## 3. 직접 설치해서 쓰기
@@ -76,7 +80,6 @@ unzip Youngpoong.zip
 | Module 2 학습·평가 | `python -m module2_prediction.train` | `artifacts/recovery_model.joblib` | P3 |
 | Module 3 추천 (1건) | `python -m module3_optimization.recommend --batch-id BP-2025-0033` | 레시피 카드 | P4 |
 | Module 3 추천 (전체) | `python -m module3_optimization.recommend --all --out artifacts/recipes.csv` | CSV | P4 |
-| 3D 씬 데이터 갱신 | `python docs/modeling/export_data.py` | `docs/modeling/data.json` | — |
 | 데모 화면 | `streamlit run app/streamlit_app.py` | <http://localhost:8501> | P5 |
 | 예측 API | `uvicorn api.main:app --port 8000` | <http://localhost:8000/docs> | P5 |
 
@@ -147,10 +150,8 @@ Dockerfile             전처리→학습→데모를 한 번에 굽는다
 compose.yaml           app(8501) + api(8000)
 ```
 
-`docs/modeling/` 안에서 `index.html`·`scene.js`·`data.json` 이 실제 페이지이고,
-`export_data.py` 가 파이프라인에서 `data.json` 을 다시 만든다.
-`standalone.html` 은 Streamlit 에 끼우기 위한 단일 파일 묶음이라
-`build_standalone.py` 가 생성한다 — 직접 고치지 않는다.
+`docs/modeling/index.html` 은 3D 디지털 트윈(P5) 한 파일이다. 단독으로 열면 데모 입력을,
+Streamlit 데모 안에서는 모듈 3 추천 결과(목표 달성일 때)를 받아 보여 준다.
 
 ## 6. 협업 규칙
 

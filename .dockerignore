@@ -18,7 +18,6 @@ Youngpoong/
 # 빌드 때 다시 만드는 산출물
 data/processed/*
 artifacts/*
-docs/modeling/standalone.html
 
 # 문서 작업물
 example/
