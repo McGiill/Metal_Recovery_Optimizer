@@ -284,7 +284,10 @@ def main() -> None:
     sentinel_cols = [c for c in cleaned.columns if c.startswith("sentinel_")]
     imputed_cols = [c for c in cleaned.columns if c.startswith("imputed_")]
     print(f"센티널 처리     : {int(cleaned[sentinel_cols].sum().sum())}칸")
-    print(f"대치된 칸       : {int(cleaned[imputed_cols].sum().sum())}칸")
+    filled = sum(int(cleaned[f"imputed_{c}"].sum()) for c in FEATURE_COLS if c not in PROCESS_COLS)
+    kept = sum(int(cleaned[f"imputed_{c}"].sum()) for c in PROCESS_COLS)
+    print(f"대치된 칸       : {filled}칸 (성분, 등급별 중앙값)")
+    print(f"결측 유지       : {kept}칸 (공정 조건, 대치하지 않음)")
     print(f"날짜 파싱 실패  : {int(cleaned['analysis_date'].isna().sum())}건 (원본 결측)")
     print(f"등급 분포       : {cleaned['grade'].value_counts().to_dict()}")
     remaining = int(cleaned[FEATURE_COLS + TARGET_COLS].isna().sum().sum())

@@ -7,18 +7,20 @@ ni_co_ratio이며 ALL_DERIVED_COLS로 총 11개를 선택할 수 있다.
 Arrhenius의 Ea/R=3000 K는 가정값이다.
 """
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
-from pathlib import Path
-from module1_preprocessing.cleaning import FEATURE_COLS, TARGET_COLS
-from sklearn.ensemble import RandomForestRegressor, ExtraTreesRegressor
-from sklearn.linear_model import Ridge, LinearRegression
-from sklearn.multioutput import MultiOutputRegressor
+from sklearn.ensemble import ExtraTreesRegressor, RandomForestRegressor
+from sklearn.linear_model import LinearRegression, Ridge
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import TimeSeriesSplit
+from sklearn.multioutput import MultiOutputRegressor
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
+
 from module1_preprocessing import cleaning as p1
+from module1_preprocessing.cleaning import FEATURE_COLS, TARGET_COLS
 
 DERIVED_COLS = [
     "acid_per_feed", "impurity_total", "temp_x_time", "arrhenius", "ni_co_ratio"
@@ -78,7 +80,7 @@ def load_p1_output(path):
     if missing:
         raise ValueError(f'P1 CSV의 필수 열이 없습니다: {sorted(missing)}')
     # P1 CSV는 원본 16열 + sentinel_/imputed_ 플래그 17열 = 33열이다.
-    # 플래그는 대치 이력 추적용이며 모델 입력에는 쓰지 않는다. 존재해도 무시한다.
+    # 플래그는 EDA에서 처리 이력을 보존하고, 평가 전에 원래 결측을 복원한다.
     frame['analysis_date'] = pd.to_datetime(frame['analysis_date'], errors='raise')
     if frame['batch_id'].isna().any() or not frame['batch_id'].is_unique:
         raise ValueError('P1 CSV의 배치 ID는 비어 있지 않고 고유해야 합니다.')
@@ -87,14 +89,61 @@ def load_p1_output(path):
     frame['grade'] = frame['grade'].astype('string').astype('category')
     for col in FEATURE_COLS + TARGET_COLS:
         frame[col] = pd.to_numeric(frame[col], errors='raise')
-    if not np.isfinite(frame[FEATURE_COLS + TARGET_COLS].to_numpy(dtype=float)).all():
-        raise ValueError('P1 데이터의 수치 결측·무한값을 확인하세요. P2는 추가 대체하지 않습니다.')
+    if np.isinf(frame[FEATURE_COLS + TARGET_COLS].to_numpy(dtype=float)).any():
+        raise ValueError('P1 데이터에 무한값이 있습니다.')
+    for col in FEATURE_COLS + TARGET_COLS:
+        flag = f'imputed_{col}'
+        if flag in frame:
+            frame[flag] = _imputed_mask(frame[flag])
     return frame
 
+def _imputed_mask(series):
+    """CSV의 bool/0·1 플래그를 엄격하게 읽는다. 'False'를 True로 해석하지 않는다."""
+    flags = series.astype('string').str.strip().str.lower().map(
+        {'true': True, 'false': False, '1': True, '0': False})
+    if flags.isna().any():
+        raise ValueError(f'결측 이력 플래그가 올바르지 않습니다: {series.name}')
+    return flags.astype(bool)
+
 def prepare_processed(frame):
-    eligible = frame['analysis_date'].notna() & frame[TARGET_COLS].notna().all(axis=1)
+    """원래 결측을 복원하고 날짜·타깃·공정값이 관측된 행만 평가에 사용한다.
+
+    Module 2의 정책 C처럼 공정 결측 행은 보류한다. 성분 결측은 남겨 두고
+    evaluate_features에서 학습 구간만으로 대치한다. 입력 프레임은 변경하지 않는다.
+    """
+    frame = frame.copy()
+    for col in FEATURE_COLS + TARGET_COLS:
+        flag = f'imputed_{col}'
+        if flag in frame:
+            frame.loc[_imputed_mask(frame[flag]), col] = np.nan
+    if np.isinf(frame[FEATURE_COLS + TARGET_COLS].to_numpy(dtype=float)).any():
+        raise ValueError('평가 입력에 무한값이 있습니다.')
+    eligible = (frame['analysis_date'].notna()
+                & frame[TARGET_COLS + p1.PROCESS_COLS].notna().all(axis=1))
     return (frame.loc[eligible].sort_values(['analysis_date', 'batch_id']).reset_index(drop=True),
             frame.loc[~eligible].copy())
+
+def _feature_pair(train, other, derived_cols):
+    """학습 구간의 성분 중앙값으로 양쪽을 대치한 뒤 파생변수를 계산한다."""
+    cols = p1.COMPOSITION_COLS
+    global_median = train[cols].median()
+    empty = global_median[global_median.isna()].index.tolist()
+    if empty:
+        raise ValueError(f'학습 구간에서 전부 결측인 성분: {empty}')
+    grade_median = train.groupby('grade', observed=True)[cols].median()
+
+    def transform(data):
+        out = data.copy()
+        filler = grade_median.reindex(data['grade'].to_numpy())
+        filler.index = data.index
+        out[cols] = out[cols].fillna(filler.fillna(global_median))
+        out = add_features(out, feature_cols=derived_cols)
+        numeric = FEATURE_COLS + TARGET_COLS + list(derived_cols)
+        if not np.isfinite(out[numeric].to_numpy(dtype=float)).all():
+            raise ValueError('학습 구간 대치 후에도 결측·무한값이 있습니다. 공정값과 파생변수 분모를 확인하세요.')
+        return out
+
+    return transform(train), transform(other)
 
 def make_model(name):
     if name == "LinearRegression":
@@ -140,14 +189,13 @@ def variants(derived_cols=None):
     return result
 
 def evaluate_features(frame, n_splits=4, model_names=None, derived_cols=None, progress=None):
-    """마지막 15% 관측일은 테스트로 격리하고 앞 구간의 시간순 CV로 후보 선택."""
+    """공정 관측 행에서 시간순 CV로 후보를 선택하고 마지막 15% 날짜로 평가한다.
+
+    P1 대치값은 플래그로 복원하며 성분 대치 기준은 각 학습 구간에서만 계산한다.
+    """
     model_names = ["Ridge", "RandomForest"] if model_names is None else list(model_names)
     derived_cols = list(DERIVED_COLS if derived_cols is None else derived_cols)
-    def feature_pair(train, other):
-        for data in (train, other):
-            if not np.isfinite(data[p1.FEATURE_COLS + p1.TARGET_COLS].to_numpy(dtype=float)).all():
-                raise ValueError('P1 정제값을 그대로 쓰는 평가에는 수치 결측·무한값이 없어야 합니다.')
-        return add_features(train, feature_cols=derived_cols), add_features(other, feature_cols=derived_cols)
+    frame, review = prepare_processed(frame)
     dates = frame["analysis_date"].drop_duplicates().to_numpy()
     cut = int(len(dates) * .85)
     if cut <= n_splits or cut == len(dates):
@@ -162,7 +210,7 @@ def evaluate_features(frame, n_splits=4, model_names=None, derived_cols=None, pr
         train = dev.loc[dev["analysis_date"].isin(dev_dates[train_idx])]
         valid = dev.loc[dev["analysis_date"].isin(dev_dates[valid_idx])]
         assert train["analysis_date"].max() < valid["analysis_date"].min()
-        xtrain, xvalid = feature_pair(train, valid)
+        xtrain, xvalid = _feature_pair(train, valid, derived_cols)
         folds.append({"fold": fold, "train_rows": len(train), "valid_rows": len(valid),
                       "train_end": train["analysis_date"].max(), "valid_start": valid["analysis_date"].min(),
                       "valid_end": valid["analysis_date"].max()})
@@ -189,7 +237,7 @@ def evaluate_features(frame, n_splits=4, model_names=None, derived_cols=None, pr
     wins = paired.assign(improved=paired["delta_RMSE"] < 0).groupby(["model", "variant"])["improved"].sum().rename("improved_folds").reset_index()
     summary = summary.merge(wins, on=["model", "variant"], how="left")
     selected = summary.loc[summary.groupby("model")["mean_RMSE"].idxmin()].copy()
-    xdev, xtest = feature_pair(dev, test)
+    xdev, xtest = _feature_pair(dev, test, derived_cols)
     test_scores = []
     for model_name in model_names:
         chosen = selected.loc[selected["model"].eq(model_name), "variant"].iloc[0]
@@ -201,4 +249,5 @@ def evaluate_features(frame, n_splits=4, model_names=None, derived_cols=None, pr
                                 **metrics(xtest[p1.TARGET_COLS], model.predict(xtest[columns]))})
     return {"cv_detail": detail, "cv_summary": summary, "folds": pd.DataFrame(folds),
             "selected": selected, "test_scores": pd.DataFrame(test_scores), "paired": paired,
-            "development": dev, "test": test, "test_start": pd.Timestamp(test_start)}
+            "development": dev, "test": test, "test_start": pd.Timestamp(test_start),
+            "review": review}
