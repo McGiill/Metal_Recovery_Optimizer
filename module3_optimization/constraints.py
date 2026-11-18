@@ -22,7 +22,7 @@ EPS = 1e-9
 def bounded(
     values: pd.Series, lo: float | None = None, hi: float | None = None
 ) -> ConstraintResult:
-    """lo ≤ values ≤ hi (경계 포함). None 인 쪽은 검사하지 않는다."""
+    """유한한 값에 대해 lo ≤ values ≤ hi. None 인 경계는 검사하지 않는다."""
     values = values.astype(float)
     violation = pd.Series(0.0, index=values.index)
     if lo is not None:
@@ -30,6 +30,8 @@ def bounded(
     if hi is not None:
         violation += (values - hi).clip(lower=0)
     violation = violation.where(violation > EPS, 0.0)
+    # NaN 비교는 False이므로 위의 허용 오차 처리만으로는 성공으로 바뀐다.
+    violation = violation.where(np.isfinite(values), np.inf)
     return violation == 0.0, violation
 
 
@@ -41,7 +43,7 @@ def box(df: pd.DataFrame, var: str, lo: float, hi: float) -> ConstraintResult:
 def ratio(
     df: pd.DataFrame, col: str, lo: float | None, hi: float | None
 ) -> ConstraintResult:
-    """비율 제약 (예: acid_per_feed). 범위가 둘 다 None 이면 항상 만족."""
+    """비율 제약 (예: acid_per_feed). 범위가 둘 다 None 이면 유한성만 검사."""
     return bounded(df[col], lo, hi)
 
 

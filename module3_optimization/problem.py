@@ -17,6 +17,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+import numpy as np
 import pandas as pd
 
 from module3_optimization import constraints as C
@@ -227,6 +228,15 @@ class Problem:
 
     def _constraints(self, out: pd.DataFrame) -> dict[str, C.ConstraintResult]:
         results: dict[str, C.ConstraintResult] = {}
+        # 예측 실패 후보는 목표 미달 대체안에서도 제외한다. 확률 제약을 꺼도
+        # 표시 구간에 σ를 쓰므로 유한하고 음수가 아닌 불확실성이 필요하다.
+        prediction_ok = np.isfinite(out[PRED_COLS]).all(axis=1) & out[
+            ["ni_std", "co_std"]
+        ].ge(0).all(axis=1)
+        results["prediction"] = (
+            prediction_ok,
+            pd.Series(0.0, index=out.index).where(prediction_ok, np.inf),
+        )
         for var, spec in self.variables.items():
             results[f"box_{var}"] = C.box(out, var, spec["min"], spec["max"])
 

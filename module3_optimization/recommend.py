@@ -122,7 +122,7 @@ def recommend(
         if row is None:
             return finish(
                 status=STATUS_INFEASIBLE,
-                message="박스 · 비율 · 적용 범위 제약을 모두 만족하는 공정 조건이 없습니다.",
+                message="유효한 예측과 박스 · 비율 · 적용 범위 제약을 모두 만족하는 공정 조건이 없습니다.",
             )
 
     # 5. 예측 구간 · 신뢰도

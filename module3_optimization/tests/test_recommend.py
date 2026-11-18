@@ -25,6 +25,60 @@ def domains(cfg):
 # ── 상태별 결과 ────────────────────────────────────────
 
 
+@pytest.mark.parametrize("chance_enabled", [True, False])
+@pytest.mark.parametrize(
+    "bad_column, bad_value", [("ni_pred", float("nan")), ("co_std", float("inf"))]
+)
+@pytest.mark.parametrize("scenario", ["mixed", "all_invalid", "fallback"])
+def test_recommend_never_returns_invalid_predictions(
+    cfg_nodomain, feed_a, monkeypatch, chance_enabled, bad_column, bad_value, scenario
+):
+    class Predictor:
+        def predict(self, X):
+            meets_target = scenario != "fallback"
+            out = pd.DataFrame(
+                {
+                    "ni_pred": 96.0 if meets_target else 94.0,
+                    "co_pred": 91.0 if meets_target else 89.0,
+                    "ni_std": 0.25,
+                    "co_std": 0.25,
+                },
+                index=X.index,
+            )
+            bad = (
+                pd.Series(True, index=X.index)
+                if scenario == "all_invalid"
+                else X["acid_l"].eq(400)
+            )
+            out.loc[bad, bad_column] = bad_value
+            return out
+
+    monkeypatch.setattr(
+        "module3_optimization.recommend.build_predictor", lambda cfg: Predictor()
+    )
+    cfg_nodomain["uncertainty"]["use_chance_constraint"] = chance_enabled
+    cfg_nodomain["decision_variables"] = {
+        "acid_l": {"min": 400, "max": 420, "unit": 10},
+        "temp_c": {"min": 90, "max": 90, "unit": 1},
+        "time_hr": {"min": 6, "max": 6, "unit": 0.5},
+    }
+    result = recommend(feed_a, cfg=cfg_nodomain)
+    if scenario == "all_invalid":
+        assert result.status == "infeasible"
+        assert result.recipe is None and result.prediction is None
+        assert result.shortfall is None
+    else:
+        assert result.status == ("ok" if scenario == "mixed" else "infeasible")
+        assert result.recipe["acid_l"] == 410
+        assert result.prediction["ni"]["mean"] == (
+            96.0 if scenario == "mixed" else 94.0
+        )
+        if scenario == "fallback":
+            assert result.shortfall["ni"] > 0 and result.shortfall["co"] > 0
+    # JSON 응답에 NaN/Infinity 가 남으면 표준 JSON 직렬화가 실패한다.
+    json.dumps(result.to_dict(), allow_nan=False)
+
+
 def test_ok_recipe_meets_target_and_constraints(cfg_nodomain, feed_a):
     r = recommend(feed_a, cfg=cfg_nodomain)
     assert r.status == "ok" and r.shortfall is None

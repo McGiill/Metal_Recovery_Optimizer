@@ -23,6 +23,16 @@ def test_bounded_none_side_is_ignored():
     assert ok.all()
 
 
+@pytest.mark.parametrize("lo, hi", [(95, 100), (95, None), (None, 100), (None, None)])
+def test_bounded_rejects_nonfinite_values(lo, hi):
+    values = pd.Series([np.nan, np.inf, -np.inf, 97.0], index=[8, 2, 5, 1])
+    ok, violation = C.bounded(values, lo=lo, hi=hi)
+    assert ok.tolist() == [False, False, False, True]
+    assert np.isposinf(violation.iloc[:3]).all()
+    assert violation.iloc[3] == 0.0
+    assert ok.index.equals(values.index)
+
+
 def test_round_to_unit_snaps_and_clips(cfg):
     U = pd.DataFrame(
         {
@@ -100,6 +110,40 @@ def test_config_hash_tracks_changes(cfg):
 
 
 # ── Problem.evaluate ───────────────────────────────────
+
+
+@pytest.mark.parametrize("chance_enabled", [True, False])
+@pytest.mark.parametrize(
+    "column, value",
+    [
+        (col, value)
+        for col in ("ni_pred", "co_pred", "ni_std", "co_std")
+        for value in (np.nan, np.inf, -np.inf)
+    ]
+    + [("ni_std", -1.0), ("co_std", -1e-12)],
+)
+def test_invalid_prediction_is_excluded_from_all_candidates(
+    cfg, feed_a, chance_enabled, column, value
+):
+    class Predictor:
+        def predict(self, X):
+            out = pd.DataFrame(
+                {"ni_pred": 96.0, "co_pred": 91.0, "ni_std": 0.0, "co_std": 0.0},
+                index=X.index,
+            )
+            out.loc[7, column] = value
+            return out
+
+    cfg["uncertainty"]["use_chance_constraint"] = chance_enabled
+    problem = Problem(feed=feed_a, cfg=cfg, predictor=Predictor())
+    candidates = pd.DataFrame(
+        {"acid_l": [400.0, 410.0], "temp_c": [90.0, 90.0], "time_hr": [6.0, 6.0]},
+        index=[7, 3],
+    )
+    out = problem.evaluate(candidates)
+    assert out["hard_ok"].tolist() == [False, True]
+    assert out["feasible"].tolist() == [False, True]
+    assert np.isposinf(out.loc[7, "violation"])
 
 
 def test_evaluate_single_row_equals_batch_row(cfg, feed_a):
